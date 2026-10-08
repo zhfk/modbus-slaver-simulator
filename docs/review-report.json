@@ -1,0 +1,116 @@
+{
+  "reviewed_at": "2026-10-09T00:28:07.188139+08:00",
+  "source_sha256": "8229896ba4b8d1acec50a30737c53b49deae896c91ba3dd5cfc361eb71408aa2",
+  "backend": {
+    "passed": 108,
+    "warnings": 1,
+    "seconds": 41.62,
+    "warning": "Starlette TestClient deprecation"
+  },
+  "frontend": {
+    "typecheck_and_build": "passed",
+    "browser": {
+      "passed": true,
+      "checks": [
+        "device creation",
+        "start/stop",
+        "assignment preview",
+        "assignment confirmation",
+        "pause/resume",
+        "point edit",
+        "point creation",
+        "advanced strategy edit and parameter deletion persist",
+        "advanced-only draft requires discard confirmation",
+        "slow polling has at most one request",
+        "invalid edit retains draft",
+        "keyboard Escape and focus return",
+        "real-time trend",
+        "diagnostics",
+        "1440/1024/390 layout",
+        "local font",
+        "external network blocked",
+        "SPA deep link"
+      ],
+      "page_errors": []
+    }
+  },
+  "wheel": {
+    "status": "passed",
+    "outside_checkout": true,
+    "installed_files_match_source": true,
+    "checks": [
+      "SPA deep link",
+      "static resources",
+      "local fonts and license",
+      "API readiness",
+      "real Modbus TCP write/read and API value agreement"
+    ]
+  },
+  "mixed_load": {
+    "status": "passed",
+    "planned_seconds": 140.0,
+    "completed_seconds": 140.773,
+    "requests": 8310,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "8229896ba4b8d1acec50a30737c53b49deae896c91ba3dd5cfc361eb71408aa2",
+    "failures": [],
+    "hardware": {
+      "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+      "python": "3.12.14"
+    },
+    "load": {
+      "points": 1004,
+      "clients": 4,
+      "per_client_hz": 10,
+      "strategy_interval": 0.1,
+      "history_points": 2,
+      "history_interval": 1,
+      "ui_subscription_points": 50,
+      "ui_reconnect_seconds": 30,
+      "device_restart_seconds": 120
+    },
+    "thresholds": {
+      "rss_mb": 256,
+      "rss_growth_mb": 32,
+      "p99_ms": 250,
+      "loop_delay_ms": 200,
+      "queue_count": 10000,
+      "queue_bytes": 16777216,
+      "disk_total_mb": 1536,
+      "cpu_one_core_percent": 80
+    },
+    "latest": {
+      "seconds": 139.77,
+      "rss": 130863104,
+      "cpu_one_core_percent": 11.84,
+      "threads": 5,
+      "handles": 25,
+      "tasks": 10,
+      "loop_delay_ms": 0.8141919988702284,
+      "queue_count": 6,
+      "queue_bytes": 1464,
+      "dropped": 0,
+      "disk_bytes": 15746702,
+      "p95_ms": 5.627148999337805,
+      "p99_ms": 28.538783999465522
+    },
+    "p95_ms": 5.627148999337805,
+    "p99_ms": 28.538783999465522
+  },
+  "release_gates": {
+    "24h_then_72h": {
+      "status": "running, not passed",
+      "started": "2026-10-09T00:27:11.254730+08:00",
+      "path": "artifacts/soak-review/results",
+      "required_seconds": [
+        86400,
+        259200
+      ]
+    },
+    "Windows_actual_host": "not executed",
+    "cross_machine_LAN": "not executed"
+  },
+  "raw_evidence": "Local ignored artifacts; scripts and this summary are committed."
+}

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modbus-slaver-simulator"
+version = "0.1.0"
+description = "Single-machine Modbus TCP device simulator"
+readme = "README.md"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.scripts]
+modbus-simulator = "simulator.__main__:main"
+modbus-supervisor = "simulator.supervisor:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["simulator*"]
+
+[tool.setuptools.package-data]
+simulator = ["static/**/*", "static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

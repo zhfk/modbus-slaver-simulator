@@ -1,0 +1,7 @@
+include README.md AGENTS.md requirements*.txt
+recursive-include frontend *.json *.ts *.vue *.css *.html *.txt
+prune frontend/node_modules
+prune frontend/dist
+graft scripts
+graft docs
+prune scripts/__pycache__
