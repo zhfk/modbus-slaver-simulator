@@ -7,8 +7,8 @@ GitHub [Releases](https://github.com/zhfk/modbus-slaver-simulator/releases) 中�
 Linux：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc4-linux-x86_64.tar.gz
-cd modbus-simulator-0.2.0rc4-linux-x86_64
+tar -xzf modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz
+cd modbus-simulator-0.2.0rc5-linux-x86_64
 ./start.sh
 ```
 
@@ -18,7 +18,7 @@ Windows：解压 zip，双击 `start.cmd`。需要自定义时打开 PowerShell�
 .\modbus-simulator.exe --port 8000 --data-dir "$env:LOCALAPPDATA\ModbusSimulator"
 ```
 
-macOS：选择 Intel 的 `x86_64` 或 Apple Silicon 的 `arm64` 包，解压后双击 `start.command`，或在终端执行 `./start.command`。程序未公证时，通过系统设置允许已确认来源的下载，不关闭系统安全机制。
+macOS：选择 Apple Silicon 的 `arm64` 包，解压后双击 `start.command`，或在终端执行 `./start.command`。程序未公证时，通过系统设置允许已确认来源的下载，不关闭系统安全机制。
 
 控制台显示服务已启动后，在本机浏览器打开 `http://127.0.0.1:8000`。首次没有设备，点击“新建设备”创建温控模板或空设备；配置完成后显式启动。关闭浏览器不停止服务；在启动终端按 Ctrl+C 正常停止。首次使用不需要下载依赖，应用页面和字体也不访问公网。
 
@@ -71,4 +71,4 @@ npm --prefix frontend run build
 
 Windows 对应 `.release-venv\Scripts\python.exe` 和 `modbus-simulator.exe`。默认输出 `dist/release/`，已有同名包时拒绝覆盖；可用 `--output` 指定新的输出目录。构建信息中的 libc 基线决定 Linux 兼容范围，不能承诺所有发行版均可使用。
 
-GitHub Actions 的 `release.yml` 在四种原生 runner 构建、回归检查并验证解压包。创建与 `pyproject.toml` 版本匹配的 `v*` 标签触发发布；手动运行仅生成 Actions 产物。所有平台检查成功后，发布任务使用仓库自带的 `GITHUB_TOKEN` 上传四个平台包及校验文件。当前自动发布标记为 prerelease；长期验收通过后才能另行提升为稳定版本。
+GitHub Actions 的 `release.yml` 在 Linux x86_64、Windows x64、macOS Apple Silicon 三种原生 runner 构建、回归检查并验证解压包。创建与 `pyproject.toml` 版本匹配的 `v*` 标签触发发布；手动运行仅生成 Actions 产物。三个目标全部检查成功后，发布任务使用仓库自带的 `GITHUB_TOKEN` 上传三个平台包及校验文件；不构建 Intel macOS 包。当前自动发布标记为 prerelease；长期验收通过后才能另行提升为稳定版本。

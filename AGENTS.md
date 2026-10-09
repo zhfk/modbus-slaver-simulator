@@ -655,10 +655,10 @@ Windows 打包与服务监督、无界面启动、多设备与多监听端点完
 
 ### 13.4 独立目录发布包
 
-- 用户要求下载解压即用；采用 PyInstaller 原生 onedir 包，包含 Python、依赖、前端和字体，不要求用户安装 Python／Node.js。Windows x64、Linux x86_64、macOS Intel 与 Apple Silicon 分别在对应平台构建；不能交叉重命名冒充对应平台产物。
+- 用户要求下载解压即用；采用 PyInstaller 原生 onedir 包，包含 Python、依赖、前端和字体，不要求用户安装 Python／Node.js。发布目标为 Windows x64、Linux x86_64、macOS Apple Silicon，分别在对应平台构建；用户已明确不需要 Intel macOS 包，流水线不构建或等待该目标。不能交叉重命名冒充对应平台产物。
 - `scripts/frozen_entry.py` 在导入业务模块前执行 `multiprocessing.freeze_support()`；统一入口提供默认监督启动、`serve`、`maintenance` 和 `--version`。监督器冻结运行时重新执行同一程序的 `serve` 命令，不能使用 `-m simulator` 启动冻结可执行文件。Excel spawn 子进程必须在独立包实际验收。
 - 使用 `requirements-release.txt` 约束构建依赖；`scripts/build_release.py` 拒绝缺少前端／字体的构建，生成平台压缩包、SHA256、许可证、构建信息及常驻模板。数据目录与 `_internal/` 资源分开；macOS 默认使用用户 Library/Application Support。
 - `.github/workflows/release.yml` 原生构建并运行后端回归和 `scripts/release_check.py`；验证器从仓库外清空 Python 路径环境运行冻结包，验证三台从机共享端点、点位隔离、独立停止、WebSocket、Excel、维护及监督。全部平台成功后才上传 GitHub 预发布，不把 CI 未完成写成已通过。
 - Linux libc 与架构、macOS 最低已验证系统及未公证状态在发布说明注明；不声称所有系统库都能跨 OS 通用。常驻模板不绕过监督器有限重启。
 - SQLite 的连接上下文只负责事务，不负责关闭连接；备份轮换及恢复替换前必须显式关闭连接，避免 Windows 文件句柄阻止重命名。回归须核对轮换前连接已关闭。
-- 当前独立包是 0.2.0rc4 功能预发布。旧源码耐久测试在约 8 小时调度延迟超限失败，保留证据；24／72 小时、目标用户系统与实际 LAN 仍待验收。本轮交付功能候选包，不能据此宣称长期稳定验收通过。
+- 当前独立包是 0.2.0rc5 功能预发布。旧源码耐久测试在约 8 小时调度延迟超限失败，保留证据；24／72 小时、目标用户系统与实际 LAN 仍待验收。本轮交付功能候选包，不能据此宣称长期稳定验收通过。
