@@ -177,6 +177,163 @@ def test_invalid_template_port_does_not_create_device(client, port):
     assert client.get("/api/config").json()["devices"] == []
 
 
+@pytest.mark.parametrize("mode", ["template", "empty", "edit"])
+def test_duplicate_unit_is_rejected_without_changing_configuration(client, mode):
+    template(client)
+    if mode == "edit":
+        assert (
+            client.post(
+                "/api/templates/thermal", json={"version": 1, "unit_id": 2}
+            ).status_code
+            == 200
+        )
+    before = client.get("/api/config").json()
+    if mode == "template":
+        response = client.post(
+            "/api/templates/thermal", json={"version": before["version"]}
+        )
+    else:
+        candidate = json.loads(json.dumps(before))
+        if mode == "empty":
+            candidate["devices"].append({"id": "second", "points": []})
+        else:
+            candidate["devices"][1]["unit_id"] = 1
+        response = client.put("/api/config", json=candidate)
+    assert response.status_code == 422
+    assert "同一端点 Unit ID 重复" in response.text
+    assert "127.0.0.1:1502" in response.text
+    assert "温控" in response.text
+    assert client.get("/api/config").json() == before
+    assert len(client.get("/api/devices").json()) == len(before["devices"])
+
+
+@pytest.mark.parametrize("mode", ["template", "empty"])
+@pytest.mark.parametrize(
+    "change", [{"unit_id": 2}, {"port": 1503}, {"host": "127.0.0.2"}]
+)
+def test_device_creation_accepts_distinct_units_or_endpoints(client, mode, change):
+    template(client)
+    if mode == "template":
+        response = client.post("/api/templates/thermal", json={"version": 1, **change})
+    else:
+        candidate = client.get("/api/config").json()
+        candidate["devices"].append({"id": "second", "points": [], **change})
+        response = client.put("/api/config", json=candidate)
+    assert response.status_code == 200, response.text
+    assert len(client.get("/api/devices").json()) == 2
+
+
+@pytest.mark.parametrize("mode", ["template", "empty", "edit"])
+@pytest.mark.parametrize("unit", [1, 2])
+@pytest.mark.parametrize(
+    "hosts",
+    [
+        ("127.0.0.1", "0.0.0.0"),
+        ("0.0.0.0", "127.0.0.1"),
+        ("::1", "::"),
+        ("::", "::1"),
+    ],
+)
+def test_wildcard_endpoint_overlap_is_rejected_without_commit(
+    client, mode, unit, hosts
+):
+    first, second = hosts
+    assert (
+        client.post(
+            "/api/templates/thermal",
+            json={"version": 0, "name": "已占用设备", "host": first},
+        ).status_code
+        == 200
+    )
+    if mode == "edit":
+        assert (
+            client.post(
+                "/api/templates/thermal",
+                json={"version": 1, "host": second, "port": 1503, "unit_id": unit},
+            ).status_code
+            == 200
+        )
+    before = client.get("/api/config").json()
+    if mode == "template":
+        response = client.post(
+            "/api/templates/thermal",
+            json={"version": before["version"], "host": second, "unit_id": unit},
+        )
+    else:
+        candidate = json.loads(json.dumps(before))
+        if mode == "empty":
+            candidate["devices"].append(
+                {"id": "second", "host": second, "unit_id": unit, "points": []}
+            )
+        else:
+            candidate["devices"][1]["port"] = 1502
+        response = client.put("/api/config", json=candidate)
+    assert response.status_code == 422
+    assert "监听地址冲突" in response.text
+    assert "已占用设备" in response.text
+    assert client.get("/api/config").json() == before
+    assert len(client.get("/api/devices").json()) == len(before["devices"])
+
+
+@pytest.mark.parametrize("mode", ["template", "empty"])
+@pytest.mark.parametrize(
+    "first,second,port,unit",
+    [
+        ("0.0.0.0", "0.0.0.0", 1502, 2),
+        ("127.0.0.1", "0.0.0.0", 1503, 1),
+        ("::", "::", 1502, 2),
+        ("::1", "::", 1503, 1),
+        ("0.0.0.0", "::", 1502, 1),
+    ],
+)
+def test_nonoverlapping_wildcard_configuration_is_accepted(
+    client, mode, first, second, port, unit
+):
+    assert (
+        client.post(
+            "/api/templates/thermal", json={"version": 0, "host": first}
+        ).status_code
+        == 200
+    )
+    device = {"host": second, "port": port, "unit_id": unit}
+    if mode == "template":
+        response = client.post("/api/templates/thermal", json={"version": 1, **device})
+    else:
+        candidate = client.get("/api/config").json()
+        candidate["devices"].append({"id": "second", "points": [], **device})
+        response = client.put("/api/config", json=candidate)
+    assert response.status_code == 200, response.text
+    assert len(client.get("/api/devices").json()) == 2
+
+
+def test_legacy_endpoint_overlap_remains_editable_after_restart(tmp_path):
+    with TestClient(create_app(tmp_path)) as http:
+        template(http)
+        old = http.get("/api/config").json()
+    # Reproduce the database a previous version successfully persisted.
+    import sqlite3
+    from contextlib import closing
+
+    old["devices"].append(
+        {"id": "legacy", "host": "0.0.0.0", "unit_id": 1, "points": []}
+    )
+    with closing(sqlite3.connect(tmp_path / "config.db")) as conn, conn:
+        conn.execute("UPDATE config SET data=? WHERE id=1", (json.dumps(old),))
+    with TestClient(create_app(tmp_path)) as http:
+        loaded = http.get("/api/config").json()
+        assert len(loaded["devices"]) == 2
+        assert len(http.get("/api/devices").json()) == 2
+        assert http.get("/api/health/ready").status_code == 200
+        assert http.put("/api/config", json=loaded).status_code == 422
+        fixed = json.loads(json.dumps(loaded))
+        fixed["devices"][1].update(host="127.0.0.1", unit_id=2)
+        assert http.put("/api/config", json=fixed).status_code == 200
+    with TestClient(create_app(tmp_path)) as http:
+        saved = http.get("/api/config").json()
+        assert saved["devices"][1]["host"] == "127.0.0.1"
+        assert saved["devices"][1]["unit_id"] == 2
+
+
 def test_disabled_history_still_exports_existing_samples(client):
     from openpyxl import load_workbook
     from io import BytesIO

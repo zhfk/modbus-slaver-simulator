@@ -241,6 +241,74 @@ async def run(url, output):
         await expect(
             page.get_by_role("heading", name="验收温控设备", exact=True)
         ).to_be_visible()
+        # Both creation modes and editing must reject the same endpoint/unit
+        # without changing persisted state or discarding the user's form.
+        before = await (await page.request.get(url + "/api/config")).json()
+        for mode in ("温控模板（4 个联动点位）", "空设备"):
+            await page.get_by_role("button", name="新建设备", exact=True).click()
+            dialog = page.get_by_role("dialog")
+            await dialog.get_by_label("设备名称", exact=True).fill("重复设备")
+            await dialog.get_by_label("监听 IP", exact=True).fill("127.0.0.1")
+            await dialog.get_by_label("初始配置", exact=True).select_option(label=mode)
+            await dialog.get_by_label("Modbus 端口", exact=True).fill("15120")
+            await dialog.get_by_label("Unit ID", exact=True).fill("1")
+            await dialog.get_by_role("button", name="创建设备", exact=True).click()
+            await expect(dialog.locator(".message.error")).to_contain_text(
+                "同一端点 Unit ID 重复"
+            )
+            await expect(dialog.locator(".message.error")).to_contain_text(
+                "验收温控设备"
+            )
+            await expect(dialog.get_by_label("设备名称", exact=True)).to_have_value(
+                "重复设备"
+            )
+            assert await (await page.request.get(url + "/api/config")).json() == before
+            await dialog.get_by_label("监听 IP", exact=True).fill("0.0.0.0")
+            for unit in ("1", "2"):
+                await dialog.get_by_label("Unit ID", exact=True).fill(unit)
+                await dialog.get_by_role("button", name="创建设备", exact=True).click()
+                await expect(dialog.locator(".message.error")).to_contain_text(
+                    "监听地址冲突"
+                )
+                await expect(dialog.get_by_label("监听 IP", exact=True)).to_have_value(
+                    "0.0.0.0"
+                )
+                assert (
+                    await (await page.request.get(url + "/api/config")).json() == before
+                )
+            await page.keyboard.press("Escape")
+        await page.get_by_role("button", name="新建设备", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        await dialog.get_by_label("设备名称", exact=True).fill("共享端点第二台")
+        await dialog.get_by_label("监听 IP", exact=True).fill("127.0.0.1")
+        await dialog.get_by_label("Unit ID", exact=True).fill("2")
+        await dialog.get_by_role("button", name="创建设备", exact=True).click()
+        await expect(
+            page.get_by_role("heading", name="共享端点第二台", exact=True)
+        ).to_be_visible()
+        await (
+            page.locator(".page-header")
+            .get_by_role("button", name="设备设置", exact=True)
+            .click()
+        )
+        dialog = page.get_by_role("dialog")
+        await dialog.get_by_label("Unit ID", exact=True).fill("1")
+        before = await (await page.request.get(url + "/api/config")).json()
+        await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
+        await expect(dialog.locator(".message.error")).to_contain_text(
+            "同一端点 Unit ID 重复"
+        )
+        await expect(dialog.get_by_label("Unit ID", exact=True)).to_have_value("1")
+        assert await (await page.request.get(url + "/api/config")).json() == before
+        await dialog.get_by_label("Unit ID", exact=True).fill("2")
+        await dialog.get_by_label("绑定 IP", exact=True).fill("0.0.0.0")
+        await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
+        await expect(dialog.locator(".message.error")).to_contain_text("监听地址冲突")
+        assert await (await page.request.get(url + "/api/config")).json() == before
+        await dialog.get_by_label("绑定 IP", exact=True).fill("127.0.0.1")
+        await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        assert not failures, failures
         await browser.close()
     report = {
         "passed": True,
@@ -248,6 +316,9 @@ async def run(url, output):
             "actual read-only storage directory at 1440/1024/390 widths",
             "right drawer preserves workspace width and scroll, locks background and restores focus",
             "device creation",
+            "template and empty creation reject duplicate endpoint/unit and retain drafts",
+            "distinct unit shares endpoint; editing rejects duplicates and excludes itself",
+            "wildcard/specific address overlap rejected in both creation modes and editing",
             "start/stop",
             "assignment preview",
             "assignment confirmation",

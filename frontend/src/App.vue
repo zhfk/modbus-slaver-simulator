@@ -542,9 +542,38 @@ async function deviceAction(kind: string) {
           : "设备操作已完成";
   });
 }
+function validateDeviceEndpoint(
+  host: string,
+  port: number,
+  unit: number,
+  id = "",
+) {
+  if (!Number.isInteger(unit) || unit < 0 || unit > 255)
+    throw new Error("Unit ID 必须是 0～255 的整数");
+  const overlap = config.value.devices.find((d: Row) => {
+    if (d.id === id || d.port !== port || d.host === host) return false;
+    const ipv6 = host.includes(":"),
+      otherIpv6 = d.host.includes(":");
+    const wildcard = (ip: string) => ip === "0.0.0.0" || ip === "::";
+    return ipv6 === otherIpv6 && (wildcard(host) || wildcard(d.host));
+  });
+  if (overlap)
+    throw new Error(
+      `监听地址冲突：${host}:${port} 与“${overlap.name}”的 ${overlap.host}:${port} 重叠。共享端口请使用相同监听 IP 和不同 Unit ID，或修改端口。`,
+    );
+  const conflict = config.value.devices.find(
+    (d: Row) =>
+      d.id !== id && d.host === host && d.port === port && d.unit_id === unit,
+  );
+  if (conflict)
+    throw new Error(
+      `同一端点 Unit ID 重复：${host}:${port} 的 Unit ID ${unit} 已由“${conflict.name}”使用，请修改 Unit ID 或监听端点。`,
+    );
+}
 async function createDevice() {
   await action(async () => {
     await refreshConfig();
+    validateDeviceEndpoint(newHost.value, newPort.value, newUnit.value);
     if (addTemplate.value) {
       const result = await request("/api/templates/thermal", {
         method: "POST",
@@ -586,6 +615,12 @@ async function editDevice() {
 }
 async function saveDevice() {
   await action(async () => {
+    validateDeviceEndpoint(
+      draft.value.host,
+      draft.value.port,
+      draft.value.unit_id,
+      draft.value.id,
+    );
     draft.value.valid_ranges = JSON.parse(rangeText.value);
     const candidate = clone(config.value);
     candidate.devices = candidate.devices.map((d: Row) =>
@@ -1618,6 +1653,11 @@ onUnmounted(() => {
               /></label>
             </div>
             <p>
+              Unit ID 为 0～255 的整数；同一监听 IP
+              和端口下不能重复，不同端点可重复。 0.0.0.0 覆盖所有 IPv4
+              地址，不能与具体 IPv4 地址另建同端口监听；IPv6 的 :: 同理。
+            </p>
+            <p>
               本机测试用 127.0.0.1；允许外部主机连接可绑定 0.0.0.0。Web
               管理端口仍仅供本机访问。
             </p>
@@ -1917,7 +1957,11 @@ onUnmounted(() => {
               >说明<textarea v-model="draft.description"></textarea>
             </label>
             <h3>监听与协议</h3>
-            <p>改变监听参数须先停止设备。同端点不同 Unit ID 可共享监听。</p>
+            <p>
+              改变监听参数须先停止设备。Unit ID 为 0～255 的整数；同一监听 IP
+              和端口下不能重复，不同端点可重复。 0.0.0.0 覆盖所有 IPv4
+              地址，不能与具体 IPv4 地址另建同端口监听；IPv6 的 :: 同理。
+            </p>
             <div class="form-grid">
               <label>绑定 IP<input v-model="draft.host" required /></label
               ><label
@@ -1931,7 +1975,8 @@ onUnmounted(() => {
                   type="number"
                   v-model.number="draft.unit_id"
                   min="0"
-                  max="255" /></label
+                  max="255"
+                  required /></label
               ><label
                 >最大连接数<input
                   type="number"

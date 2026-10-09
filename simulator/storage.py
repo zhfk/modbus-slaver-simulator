@@ -249,7 +249,12 @@ class Storage:
                 lambda c: c.execute("SELECT data FROM config WHERE id=1").fetchone()
             )
             if row:
-                self.config = Configuration.model_validate_json(row[0])
+                # Older versions allowed wildcard/specific listeners on one
+                # port. Keep them accessible for correction; new API/import
+                # submissions still undergo the full endpoint validation.
+                self.config = Configuration.model_validate_json(
+                    row[0], context={"allow_legacy_endpoint_overlap": True}
+                )
         except Exception as exc:
             self.error = str(exc)
         # A damaged optional history database must not prevent a validated

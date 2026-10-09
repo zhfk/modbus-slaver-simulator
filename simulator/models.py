@@ -4,7 +4,7 @@ import math
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, model_validator
 from .codec import encode, width
 
 
@@ -359,17 +359,42 @@ class Configuration(StrictModel):
     settings: Settings = Field(default_factory=Settings)
 
     @model_validator(mode="after")
-    def validate_all(self):
-        ids, point_ids, endpoints, units = set(), set(), set(), set()
+    def validate_all(self, info: ValidationInfo):
+        allow_legacy_overlap = bool(
+            info.context and info.context.get("allow_legacy_endpoint_overlap")
+        )
+        ids, point_ids, endpoints, units = set(), set(), {}, {}
         for d in self.devices:
             if d.id in ids:
                 raise ValueError("设备 ID 重复")
             ids.add(d.id)
-            endpoints.add((d.host, d.port))
+            address = ipaddress.ip_address(d.host)
+            for (host, port), name in endpoints.items():
+                other = ipaddress.ip_address(host)
+                if (
+                    not allow_legacy_overlap
+                    and port == d.port
+                    and host != d.host
+                    and address.version == other.version
+                    and (
+                        address.is_unspecified
+                        or other.is_unspecified
+                        or address == other
+                    )
+                ):
+                    raise ValueError(
+                        f"监听地址冲突：{d.host}:{d.port} 与“{name}”的 "
+                        f"{host}:{port} 重叠。共享端口请使用相同监听 IP "
+                        "和不同 Unit ID，或修改端口"
+                    )
+            endpoints.setdefault((d.host, d.port), d.name)
             key = (d.host, d.port, d.unit_id)
             if key in units:
-                raise ValueError("同一端点 Unit ID 重复")
-            units.add(key)
+                raise ValueError(
+                    f"同一端点 Unit ID 重复：{d.host}:{d.port} 的 Unit ID "
+                    f"{d.unit_id} 已由“{units[key]}”使用，请修改 Unit ID 或监听端点"
+                )
+            units[key] = d.name
             for p in d.points:
                 if p.id in point_ids:
                     raise ValueError("全局点位 ID 必须唯一")
