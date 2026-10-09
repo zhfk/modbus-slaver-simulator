@@ -9,6 +9,8 @@ import {
   watch,
 } from "vue";
 import FeedbackBubbles, { type Feedback } from "./FeedbackBubbles.vue";
+import HelpPage from "./HelpPage.vue";
+import TourGuide, { guideSteps } from "./TourGuide.vue";
 import { buildTrendChart, nearestTrendPoint } from "./trend";
 type Row = Record<string, any>;
 const config = ref<Row>({ version: 0, devices: [], settings: {} });
@@ -23,6 +25,11 @@ const tab = ref("monitor"),
   area = ref(""),
   filterState = ref(""),
   sort = ref("config");
+const helpOpen = ref(location.pathname.replace(/\/$/, "") === "/help");
+const guideStep = ref<number | null>(null);
+let workspaceScroll = 0;
+let helpFocusReturn: HTMLElement | null = null;
+const dismissedAssignmentWarning = ref("");
 const selectedDevices = ref<string[]>([]);
 const batchResult = ref<Row | null>(null);
 const batchKind = ref("");
@@ -53,6 +60,8 @@ const health = ref<Row>({ storage: {}, endpoints: [] }),
   onlyErrors = ref(false),
   expandedLog = ref<Row | null>(null);
 const connections = ref<Row>({ items: [], active: false });
+const assignmentHistory = ref<Row>({ items: [], warning: "" });
+const assignmentDetail = ref<Row | null>(null);
 const deviceConnectionCount = computed(
   () => connections.value.items.filter((c: Row) => c.accessed_device).length,
 );
@@ -103,6 +112,17 @@ const storageError = computed(
 );
 const feedbackItems = computed<Feedback[]>(() => {
   const items: Feedback[] = [];
+  if (
+    tab.value === "assignments" &&
+    assignmentHistory.value.warning &&
+    assignmentHistory.value.warning !== dismissedAssignmentWarning.value
+  )
+    items.push({
+      id: "assignment-storage",
+      title: "赋值历史存储提示",
+      kind: "alert",
+      message: assignmentHistory.value.warning,
+    });
   if (notice.value)
     items.push({
       id: "notice",
@@ -194,6 +214,10 @@ const feedbackItems = computed<Feedback[]>(() => {
   return items;
 });
 function dismissFeedback(id: string) {
+  if (id === "assignment-storage") {
+    dismissedAssignmentWarning.value = assignmentHistory.value.warning;
+    return;
+  }
   if (id === "batch") batchResult.value = null;
   else if (id === "notice") notice.value = "";
   else if (id === "error") error.value = "";
@@ -393,6 +417,7 @@ const modalTitle = computed(
         import: "Excel 导入",
         storage: "存储与恢复设置",
         history: "历史数据",
+        assignments: "赋值记录详情",
       }) as Row
     )[modal.value] || "",
 );
@@ -586,6 +611,12 @@ async function poll() {
         if (key === deviceId.value && tab.value === "connections")
           connections.value = data;
       }
+      if (tab.value === "assignments") {
+        const key = deviceId.value;
+        const data = await request(`/api/devices/${key}/assignments`);
+        if (key === deviceId.value && tab.value === "assignments")
+          assignmentHistory.value = data;
+      }
       if (showTrend.value && !pauseChart.value && trendKeys.value.length) {
         const key = deviceId.value;
         const ids = trendKeys.value.join(",");
@@ -612,6 +643,7 @@ async function poll() {
 }
 async function selectDevice(key: string) {
   if (!(await closeModal())) return false;
+  if (helpOpen.value) await navigateHelp(false);
   closeDeviceMenu();
   deviceId.value = key;
   showNav.value = false;
@@ -622,6 +654,9 @@ watch(deviceId, async (key, previous) => {
   closeRuntimeStatus();
   closePacket();
   connections.value = { items: [], active: false };
+  assignmentHistory.value = { items: [], warning: "" };
+  dismissedAssignmentWarning.value = "";
+  assignmentDetail.value = null;
   diagnostics.value = [];
   if (deviceMemory.size >= 16)
     deviceMemory.delete(deviceMemory.keys().next().value!);
@@ -908,10 +943,14 @@ async function closeModal() {
     !confirm("当前修改尚未保存，放弃这些修改？")
   )
     return false;
+  const wasAssignment = modal.value === "assignments";
   modal.value = "";
   draftError.value = "";
   await nextTick();
-  focusReturn?.focus({ preventScroll: true });
+  (wasAssignment && !focusReturn?.isConnected
+    ? document.getElementById("assignments-tab")
+    : focusReturn
+  )?.focus({ preventScroll: true });
   return true;
 }
 function keydown(e: KeyboardEvent) {
@@ -931,7 +970,10 @@ function keydown(e: KeyboardEvent) {
     closeDeviceMenu(true);
     return;
   }
-  if (!modal.value) return;
+  if (!modal.value) {
+    if (e.key === "Escape" && guideStep.value != null) closeGuide();
+    return;
+  }
   if (e.key === "Escape") {
     e.preventDefault();
     closeModal();
@@ -1406,6 +1448,7 @@ async function applyAssign() {
     await request(`/api/devices/${deviceId.value}/assign`, {
       method: "POST",
       body: JSON.stringify({
+        origin: "web",
         items: assigned.value.map((p) => ({ id: p.id, value: numericValue() })),
       }),
     });
@@ -1675,6 +1718,113 @@ async function openHistory() {
   historyRows.value = [];
   historyCursor.value = null;
 }
+function assignmentSource(row: Row) {
+  if (row.origin === "web") return "页面赋值";
+  if (row.origin === "api") return "API 赋值";
+  return "Modbus 写入";
+}
+function assignmentTime(value: number) {
+  return new Date(value * 1000).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    fractionalSecondDigits: 3,
+  });
+}
+function assignmentValue(change: Row, side: string) {
+  const value = change[side];
+  if (value == null) return "非有限值";
+  return formatValue({ ...change, value });
+}
+async function openAssignment(row: Row) {
+  if (!(await openModal("assignments"))) return;
+  assignmentDetail.value = clone(row);
+}
+async function navigateHelp(open: boolean) {
+  if (!(await closeModal())) return false;
+  if (open) {
+    workspaceScroll = scrollY;
+    helpFocusReturn = document.activeElement as HTMLElement;
+    guideStep.value = null;
+  }
+  closePacket();
+  closeTrend();
+  closeRuntimeStatus();
+  closeDeviceMenu();
+  if (helpOpen.value !== open) history.pushState({}, "", open ? "/help" : "/");
+  helpOpen.value = open;
+  showNav.value = false;
+  await nextTick();
+  window.scrollTo(0, open ? 0 : workspaceScroll);
+  if (open)
+    document
+      .querySelector<HTMLInputElement>(".help-search input")
+      ?.focus({ preventScroll: true });
+  else
+    (helpFocusReturn?.isConnected
+      ? helpFocusReturn
+      : document.getElementById("help-trigger")
+    )?.focus({ preventScroll: true });
+  return true;
+}
+async function syncHelpRoute() {
+  const open = location.pathname.replace(/\/$/, "") === "/help";
+  if (open === helpOpen.value) return;
+  if (!(await closeModal())) {
+    history.pushState({}, "", helpOpen.value ? "/help" : "/");
+    return;
+  }
+  helpOpen.value = open;
+  guideStep.value = null;
+  closePacket();
+  closeTrend();
+  closeRuntimeStatus();
+  closeDeviceMenu();
+  await nextTick();
+  window.scrollTo(0, open ? 0 : workspaceScroll);
+}
+async function startGuide() {
+  if (!(await navigateHelp(false))) return;
+  tab.value = "monitor";
+  guideStep.value = 0;
+}
+async function closeGuide() {
+  guideStep.value = null;
+  await nextTick();
+  document.getElementById("guide-trigger")?.focus({ preventScroll: true });
+}
+function moveGuide(delta: number) {
+  if (guideStep.value == null) return;
+  guideStep.value = Math.max(
+    0,
+    Math.min(guideSteps.length - 1, guideStep.value + delta),
+  );
+  const action = guideSteps[guideStep.value].action;
+  tab.value = ["connections", "assignments", "diagnostics"].includes(action)
+    ? action
+    : "monitor";
+  poll();
+}
+async function guideAction(name: string, event: MouseEvent) {
+  if (name === "new") await openModal("new");
+  else if (name === "storage") await openStorage();
+  else if (name === "device") await editDevice();
+  else if (name === "point") await editPoint();
+  else if (name === "strategy" && points.value.length)
+    await editPoint(points.value[0]);
+  else if (name === "control") {
+    showNav.value = true;
+    await nextTick();
+    await openDeviceMenu(event, deviceId.value);
+  } else {
+    tab.value = name;
+    await poll();
+  }
+}
 async function queryHistory(more = false) {
   await action(async () => {
     if (!historyPoint.value) throw new Error("请选择点位");
@@ -1707,6 +1857,7 @@ async function copyEndpoint() {
   }
 }
 onMounted(async () => {
+  window.addEventListener("popstate", syncHelpRoute);
   document.addEventListener("keydown", keydown);
   document.addEventListener("pointerdown", dismissDeviceMenu);
   document.addEventListener("scroll", dismissRowMenus, true);
@@ -1725,6 +1876,7 @@ onMounted(async () => {
   timer = window.setInterval(poll, 1000);
 });
 onUnmounted(() => {
+  window.removeEventListener("popstate", syncHelpRoute);
   endTrendDrag();
   lockBackground(false);
   clearInterval(timer);
@@ -1747,7 +1899,13 @@ onUnmounted(() => {
       </div>
       <div class="nav-heading">
         <span>设备工作区</span
-        ><button aria-label="新建设备" @click="openModal('new')">＋</button>
+        ><button
+          data-guide="new-device"
+          aria-label="新建设备"
+          @click="openModal('new')"
+        >
+          ＋
+        </button>
       </div>
       <div class="device-summary" aria-label="设备状态汇总">
         <strong>共 {{ devices.length }} 台</strong>
@@ -1840,7 +1998,10 @@ onUnmounted(() => {
         ><span>本机运行 · 后端提供页面</span>
       </div>
     </aside>
-    <main :inert="Boolean(modal)">
+    <main v-if="helpOpen" :inert="Boolean(modal)">
+      <HelpPage @back="navigateHelp(false)" @guide="startGuide" />
+    </main>
+    <main v-else :inert="Boolean(modal)">
       <header class="page-header">
         <div class="title-group">
           <button
@@ -1861,20 +2022,24 @@ onUnmounted(() => {
             <span>Unit {{ device.unit_id }}</span>
           </button>
         </div>
-        <button
-          v-if="device"
-          id="device-status-trigger"
-          class="status-trigger"
-          popovertarget="device-status-popover"
-          aria-label="查看设备运行状态"
-          :title="`${statusNames[device.status]}${stale ? '；数据已过期' : ''}${device.error || storageError ? '；存在异常，请查看详情' : ''}`"
-        >
-          运行状态<span
-            class="status-warning"
-            :class="{ visible: stale || device.error || storageError }"
-            >异常</span
+        <div class="workspace-actions">
+          <button id="help-trigger" @click="navigateHelp(true)">使用帮助</button
+          ><button id="guide-trigger" @click="startGuide">使用引导</button>
+          <button
+            v-if="device"
+            id="device-status-trigger"
+            class="status-trigger"
+            popovertarget="device-status-popover"
+            aria-label="查看设备运行状态"
+            :title="`${statusNames[device.status]}${stale ? '；数据已过期' : ''}${device.error || storageError ? '；存在异常，请查看详情' : ''}`"
           >
-        </button>
+            运行状态<span
+              class="status-warning"
+              :class="{ visible: stale || device.error || storageError }"
+              >异常</span
+            >
+          </button>
+        </div>
       </header>
       <section v-if="!devices.length" class="empty panel">
         <span class="eyebrow">开始配置</span>
@@ -1913,6 +2078,16 @@ onUnmounted(() => {
             "
           >
             通信诊断
+          </button>
+          <button
+            id="assignments-tab"
+            :class="{ active: tab === 'assignments' }"
+            @click="
+              tab = 'assignments';
+              poll();
+            "
+          >
+            赋值历史
           </button>
         </nav>
         <section v-if="tab === 'monitor'" class="panel monitor-panel">
@@ -2309,6 +2484,91 @@ onUnmounted(() => {
             </p>
           </div>
         </section>
+        <section v-if="tab === 'assignments'" class="panel assignment-panel">
+          <div class="section-title">
+            <div>
+              <h2>赋值历史</h2>
+              <p>
+                最近 {{ assignmentHistory.items.length }}／100 条 · 按时间倒序 ·
+                成功和失败均记录
+              </p>
+            </div>
+            <button @click="poll()">刷新记录</button>
+          </div>
+          <p class="hint">
+            记录页面／API 人工赋值和外部 Modbus
+            写入，批量操作算一条；策略自动变化不计入。升级前未记录的数值无法追溯。
+          </p>
+          <div v-if="assignmentHistory.items.length" class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间（最新在前）</th>
+                  <th>来源</th>
+                  <th>结果</th>
+                  <th>点位／数量</th>
+                  <th>赋值前 → 赋值后</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in assignmentHistory.items" :key="r.id">
+                  <td>{{ assignmentTime(r.time) }}</td>
+                  <td>
+                    <strong>{{ assignmentSource(r) }}</strong
+                    ><small v-if="r.host"
+                      >{{ r.host }}:{{ r.port }} · 功能码
+                      {{ r.function }}</small
+                    >
+                  </td>
+                  <td>
+                    <span
+                      :class="
+                        r.outcome === 'failed'
+                          ? 'assignment-failed'
+                          : 'assignment-success'
+                      "
+                      >{{ r.outcome === "failed" ? "失败" : "成功" }}</span
+                    >
+                  </td>
+                  <td>
+                    {{
+                      r.changes[0]?.name ||
+                      (r.address != null
+                        ? `${areaNames[r.area]} ${r.address}`
+                        : "未解析点位")
+                    }}<small v-if="r.count > 1">共 {{ r.count }} 个点位</small>
+                  </td>
+                  <td>
+                    <template v-if="r.outcome === 'failed'">{{
+                      r.error
+                    }}</template>
+                    <template v-else-if="r.changes.length"
+                      >{{ assignmentValue(r.changes[0], "before") }} →
+                      {{ assignmentValue(r.changes[0], "after") }}
+                      {{ r.changes[0].unit
+                      }}<small v-if="r.count > 1"
+                        >其余点位请查看详情</small
+                      ></template
+                    >
+                  </td>
+                  <td>
+                    <button
+                      :aria-label="`查看 ${r.id} 的赋值详情`"
+                      @click="openAssignment(r)"
+                    >
+                      查看详情
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty">
+            <h3>暂无赋值记录</h3>
+            <p>执行人工赋值或接收到外部主机写入后，记录会显示在这里。</p>
+          </div>
+        </section>
         <section v-if="tab === 'connections'" class="panel connection-panel">
           <div class="section-title">
             <div>
@@ -2474,6 +2734,17 @@ onUnmounted(() => {
         </section>
       </template>
     </main>
+    <TourGuide
+      v-if="guideStep != null && !modal && !helpOpen"
+      :step="guideStep"
+      :has-device="Boolean(device)"
+      :has-point="points.length > 0"
+      :busy="busy"
+      @close="closeGuide"
+      @next="moveGuide(1)"
+      @previous="moveGuide(-1)"
+      @action="guideAction"
+    />
     <section
       id="packet-detail-popover"
       popover="auto"
@@ -2651,7 +2922,7 @@ onUnmounted(() => {
     <div v-if="modal" class="drawer-layer" @click.self="closeModal">
       <section
         class="drawer"
-        :class="{ wide: ['import', 'history'].includes(modal) }"
+        :class="{ wide: ['import', 'history', 'assignments'].includes(modal) }"
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-title"
@@ -2977,6 +3248,13 @@ onUnmounted(() => {
                   :key="p.id"
                   :value="p.id"
                 >
+                  {{
+                    draft.strategy.kind === "expression"
+                      ? (draft.strategy.dependencies.includes(p.id)
+                          ? `x${draft.strategy.dependencies.indexOf(p.id)}`
+                          : "未选择") + " · "
+                      : ""
+                  }}
                   {{ p.name }} · {{ areaNames[p.area] }} {{ p.address }}
                 </option>
               </select></label
@@ -3034,9 +3312,26 @@ onUnmounted(() => {
                 为此点位策略累计运行秒数，停止、暂停或保持时不推进。支持数字、括号与
                 +、-、*、/、%（求余），不支持函数、比较或条件表达式。
               </p>
-              <p>
-                例：x0 - x1 为两点位之差，(x0 + x1) / 2
-                为平均值。修改依赖后请核对变量对应关系。
+              <p v-if="draft.strategy.dependencies.length >= 2">
+                例：(x0 + x1) / 2 计算“{{
+                  deviceConfig.points.find(
+                    (p: Row) => p.id === draft.strategy.dependencies[0],
+                  )?.name
+                }}”和“{{
+                  deviceConfig.points.find(
+                    (p: Row) => p.id === draft.strategy.dependencies[1],
+                  )?.name
+                }}”的平均值。修改依赖后请核对上方对应关系。
+              </p>
+              <p v-else-if="draft.strategy.dependencies.length === 1">
+                例：x0 * 0.5 为“{{
+                  deviceConfig.points.find(
+                    (p: Row) => p.id === draft.strategy.dependencies[0],
+                  )?.name
+                }}”当前工程值的一半。
+              </p>
+              <p v-else>
+                例：20 + t * 0.5 不需要依赖点位，从 20 开始每秒增加 0.5。
               </p>
             </div>
             <label v-if="['sequence', 'replay'].includes(draft.strategy.kind)"
@@ -3381,6 +3676,83 @@ onUnmounted(() => {
             </div>
             <button class="primary" :disabled="busy">保存存储设置</button>
           </form>
+          <div
+            v-if="modal === 'assignments' && assignmentDetail"
+            class="assignment-detail"
+          >
+            <p>
+              {{ assignmentTime(assignmentDetail.time) }} ·
+              {{ assignmentSource(assignmentDetail) }} ·
+              <strong
+                :class="
+                  assignmentDetail.outcome === 'failed'
+                    ? 'assignment-failed'
+                    : 'assignment-success'
+                "
+                >{{
+                  assignmentDetail.outcome === "failed" ? "失败" : "成功"
+                }}</strong
+              >
+            </p>
+            <p>
+              设备：{{ assignmentDetail.device_name }} · 配置版本
+              {{ assignmentDetail.config_version }} ·
+              {{ assignmentDetail.count }} 个点位
+            </p>
+            <p v-if="assignmentDetail.host">
+              主机：{{ assignmentDetail.host }}:{{ assignmentDetail.port }} ·
+              功能码 {{ assignmentDetail.function }}
+            </p>
+            <p
+              v-if="assignmentDetail.outcome === 'failed'"
+              class="assignment-warning"
+            >
+              失败原因：{{ assignmentDetail.error }}。本次未执行写入。
+            </p>
+            <p v-if="assignmentDetail.omitted" class="hint">
+              大批量操作仅保存前 20 个点位的明细，另有
+              {{ assignmentDetail.omitted }} 个点位；数量包含完整操作。
+            </p>
+            <div
+              v-for="c in assignmentDetail.changes"
+              :key="c.id"
+              class="assignment-change"
+            >
+              <h3>{{ c.name }}</h3>
+              <p>
+                {{ areaNames[c.area] }} {{ c.address }} · {{ c.type
+                }}<span v-if="c.unit"> · {{ c.unit }}</span>
+              </p>
+              <p v-if="c.requested != null">请求值：{{ c.requested }}</p>
+              <p>
+                赋值前：<strong
+                  >{{ assignmentValue(c, "before") }} {{ c.unit }}</strong
+                ><br />{{
+                  assignmentDetail.outcome === "failed"
+                    ? "未写入，原值"
+                    : "赋值后"
+                }}：<strong
+                  >{{ assignmentValue(c, "after") }} {{ c.unit }}</strong
+                >
+              </p>
+              <p class="hint">
+                原始值：{{ c.before_raw.join(", ") }} →
+                {{ c.after_raw.join(", ") }}
+              </p>
+            </div>
+            <p v-if="!assignmentDetail.changes.length" class="hint">
+              本次请求没有可解析的现有点位，失败原因和请求信息已记录。
+            </p>
+            <p v-if="assignmentDetail.requested_ids?.length" class="hint">
+              请求点位 ID：{{ assignmentDetail.requested_ids.join(", ") }}
+            </p>
+            <p v-if="assignmentDetail.request" class="hint">
+              请求 PDU（HEX）：{{ assignmentDetail.request }}
+            </p>
+            <p class="hint">
+              这里展示操作当时的记录，列表刷新或点位配置修改不会替换此详情。
+            </p>
+          </div>
           <div v-if="modal === 'history'">
             <p>
               {{

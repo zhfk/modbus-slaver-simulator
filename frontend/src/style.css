@@ -371,9 +371,53 @@ pre {
 }
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 20px;
   border-bottom: 1px solid var(--line);
   margin: 20px 0;
+}
+.workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.tour-target {
+  outline: 2px dashed var(--ink);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+.assignment-panel > .hint,
+.assignment-warning {
+  margin: 0;
+  padding: 12px 20px;
+  overflow-wrap: anywhere;
+}
+.assignment-warning,
+.assignment-failed {
+  color: var(--ink);
+  font-weight: 600;
+}
+.assignment-success {
+  color: var(--ink);
+}
+.assignment-panel td:nth-child(5) {
+  max-width: 340px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.assignment-panel td small {
+  display: block;
+  margin-top: 4px;
+  font-size: 16px;
+}
+.assignment-detail p {
+  overflow-wrap: anywhere;
+}
+.assignment-change {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
 }
 .tabs button {
   border: 0;

@@ -54,7 +54,7 @@ class Endpoint:
         if self.server:
             await asyncio.wait_for(self.server.wait_closed(), 2)
 
-    def process(self, device, pdu):
+    def process(self, device, pdu, peer=None):
         fn = pdu[0]
         if fn == 43 and device.config.read_identity:
             if len(pdu) != 4 or pdu[1] != 14 or pdu[2] not in (1, 4):
@@ -88,7 +88,9 @@ class Endpoint:
             address, and_mask, or_mask = struct.unpack(">HHH", pdu[1:])
             prior = device.read("holding", address, 1)[0]
             value = (prior & and_mask) | (or_mask & (~and_mask & 0xFFFF))
-            device.write("holding", address, [value], "external")
+            device.write(
+                "holding", address, [value], "external", peer=peer, function=fn
+            )
             return pdu
         if fn == 23:
             if len(pdu) < 10:
@@ -111,6 +113,8 @@ class Endpoint:
                 write_address,
                 list(struct.unpack(">" + "H" * write_count, pdu[10:])),
                 "external",
+                peer=peer,
+                function=fn,
             )
             values = device.read("holding", read_address, read_count)
             return bytes([23, read_count * 2]) + struct.pack(
@@ -150,17 +154,21 @@ class Endpoint:
                 address,
                 [int(count == 0xFF00) if fn == 5 else count],
                 "external",
+                peer=peer,
+                function=fn,
             )
             return pdu
         if fn == 15:
             values = [int(bool(pdu[6 + i // 8] & (1 << (i % 8)))) for i in range(count)]
-            device.write("coil", address, values, "external")
+            device.write("coil", address, values, "external", peer=peer, function=fn)
         elif fn == 16:
             device.write(
                 "holding",
                 address,
                 list(struct.unpack(">" + "H" * count, pdu[6:])),
                 "external",
+                peer=peer,
+                function=fn,
             )
         return pdu[:5]
 
@@ -230,21 +238,34 @@ class Endpoint:
                     device = self.runtime.get(key)
                     faults = device.config.faults
                     if self.rng.random() < faults.disconnect_rate:
+                        if pdu[0] in (5, 6, 15, 16, 22, 23):
+                            device.write_failure(
+                                pdu, peer, "故障注入：主动断连，未执行写入"
+                            )
                         break
                     if faults.delay_ms:
                         await asyncio.sleep(faults.delay_ms / 1000)
+                    # Online edits may replace the map while waiting.
+                    device = self.runtime.devices.get(key, device)
                     if self.rng.random() < faults.timeout_rate:
                         error = "故障注入：无响应"
                     elif device.status != "running" or self.units.get(unit) != key:
                         error = "设备已停止"
                     else:
                         try:
-                            response = self.process(self.runtime.get(key), pdu)
+                            response = self.process(self.runtime.get(key), pdu, peer)
                         except ProtocolError as exc:
                             response, error = (
                                 bytes([pdu[0] | 0x80, exc.code]),
-                                f"协议异常 {exc.code}",
+                                f"协议异常 {exc.code}："
+                                + {
+                                    1: "功能码未启用",
+                                    2: "地址未配置、越界或不可写",
+                                    3: "请求格式或数值无效",
+                                }.get(exc.code, "设备无法执行请求"),
                             )
+                    if error and pdu[0] in (5, 6, 15, 16, 22, 23):
+                        device.write_failure(pdu, peer, error)
                 elapsed = (time.monotonic() - started) * 1000
                 self.latencies.append(elapsed)
                 if len(self.latencies) > 1000:

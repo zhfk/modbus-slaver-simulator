@@ -212,6 +212,8 @@ CREATE INDEX IF NOT EXISTS sample_lookup ON samples(device,point,time,id);
 CREATE INDEX IF NOT EXISTS sample_time ON samples(time);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY,time REAL NOT NULL,data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS event_time ON events(time);
+CREATE TABLE IF NOT EXISTS assignments (id INTEGER PRIMARY KEY,time REAL NOT NULL,device TEXT NOT NULL,operation TEXT NOT NULL UNIQUE,data TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS assignment_lookup ON assignments(device,time DESC,operation DESC);
 PRAGMA user_version=1;
 """
 
@@ -231,6 +233,7 @@ class Storage:
         self.config = Configuration()
         self.queue = deque()
         self.queue_bytes = self.dropped = 0
+        self.assignment_pruned = 0
         self.last_snapshot = self.last_backup = 0
         self.restore_report = {}
         self.last_history = self.last_cleanup = 0
@@ -517,17 +520,21 @@ class Storage:
             batch.append((kind, row))
 
         def persist(conn):
+            pruned = 0
             budget = self.config.settings.telemetry_budget_mb * MiB
             conn.execute(f"PRAGMA max_page_count={max(64, int(budget * 0.7) // 4096)}")
             pages = conn.execute("PRAGMA page_count").fetchone()[0]
             free = conn.execute("PRAGMA freelist_count").fetchone()[0]
             if (pages - free) * 4096 + batch_bytes * 2 > budget * 0.55:
-                for table in ("samples", "events"):
-                    conn.execute(
+                for table in ("samples", "events", "assignments"):
+                    deleted = conn.execute(
                         f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} ORDER BY time LIMIT 1000)"
                     )
+                    if table == "assignments":
+                        pruned += deleted.rowcount
                 conn.commit()
             conn.execute("BEGIN IMMEDIATE")
+            assignment_devices = set()
             for kind, row in batch:
                 if kind == "sample":
                     conn.execute(
@@ -535,15 +542,31 @@ class Storage:
                         row,
                     )
                 else:
-                    conn.execute(
-                        "INSERT INTO events(time,data) VALUES(?,?)",
-                        (row["time"], json.dumps(row, ensure_ascii=False)),
-                    )
+                    data = json.dumps(row, ensure_ascii=False)
+                    if row.get("kind") in ("manual", "external_write") and row.get(
+                        "id"
+                    ):
+                        conn.execute(
+                            "INSERT INTO assignments(time,device,operation,data) VALUES(?,?,?,?) ON CONFLICT(operation) DO NOTHING",
+                            (row["time"], row["device"], row["id"], data),
+                        )
+                        assignment_devices.add(row["device"])
+                    else:
+                        conn.execute(
+                            "INSERT INTO events(time,data) VALUES(?,?)",
+                            (row["time"], data),
+                        )
+            for device in assignment_devices:
+                conn.execute(
+                    "DELETE FROM assignments WHERE device=? AND id NOT IN (SELECT id FROM assignments WHERE device=? ORDER BY time DESC,operation DESC LIMIT 100)",
+                    (device, device),
+                )
             conn.commit()
             conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            return pruned
 
         try:
-            await self.telemetry_db.call(persist)
+            self.assignment_pruned += await self.telemetry_db.call(persist)
             self.history_error = ""
         except Exception as exc:
             self.dropped += len(batch)
@@ -551,9 +574,18 @@ class Storage:
 
     async def cleanup(self):
         cutoff = time.time() - self.config.settings.retention_days * 86400
+        device_ids = [device.id for device in self.config.devices]
         if self.telemetry_db:
 
             def clean(conn):
+                pruned = 0
+                # Assignment retention is count-based for live devices.
+                placeholders = ",".join("?" for _ in device_ids) or "NULL"
+                removed = f"device NOT IN ({placeholders})" if device_ids else "1=1"
+                conn.execute(
+                    f"DELETE FROM assignments WHERE id IN (SELECT id FROM assignments WHERE {removed} LIMIT 1000)",
+                    device_ids,
+                )
                 for table in ("samples", "events"):
                     conn.execute(
                         f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE time<? LIMIT 1000)",
@@ -565,15 +597,18 @@ class Storage:
                 if (
                     pages - free
                 ) * 4096 > self.config.settings.telemetry_budget_mb * MiB * 0.55:
-                    for table in ("samples", "events"):
-                        conn.execute(
+                    for table in ("samples", "events", "assignments"):
+                        deleted = conn.execute(
                             f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} ORDER BY time LIMIT 1000)"
                         )
+                        if table == "assignments":
+                            pruned += deleted.rowcount
                 conn.commit()
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                return pruned
 
             try:
-                await self.telemetry_db.call(clean)
+                self.assignment_pruned += await self.telemetry_db.call(clean)
             except Exception as exc:
                 self.history_error = str(exc)
         for path in self.tmp.glob("*"):
@@ -665,6 +700,56 @@ class Storage:
             for r in rows
         ]
 
+    async def assignments(self, device):
+        if not self.telemetry_reader:
+            raise DomainError("赋值历史库不可用，本次运行的缓存仍可查看", 503)
+
+        def query(conn):
+            deadline = time.monotonic() + 2
+            conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+            try:
+                return conn.execute(
+                    "SELECT data FROM assignments WHERE device=? ORDER BY time DESC,operation DESC LIMIT 100",
+                    (device,),
+                ).fetchall()
+            finally:
+                conn.set_progress_handler(None, 0)
+
+        try:
+            rows = await self.telemetry_reader.call(query, timeout=3)
+            result = [json.loads(row[0]) for row in rows]
+            if any(
+                not isinstance(row, dict)
+                or not isinstance(row.get("id"), str)
+                or not isinstance(row.get("time"), (float, int))
+                or not isinstance(row.get("changes"), list)
+                or len(row["changes"]) > 20
+                or not isinstance(row.get("count"), int)
+                or row.get("outcome") not in ("success", "failed")
+                or any(
+                    not isinstance(change, dict)
+                    or not {
+                        "id",
+                        "name",
+                        "type",
+                        "area",
+                        "address",
+                        "before",
+                        "after",
+                        "before_raw",
+                        "after_raw",
+                    }.issubset(change)
+                    or not isinstance(change["before_raw"], list)
+                    or not isinstance(change["after_raw"], list)
+                    for change in row["changes"]
+                )
+                for row in result
+            ):
+                raise ValueError("无效赋值记录")
+            return result
+        except Exception as exc:
+            raise DomainError("赋值历史读取失败，本次运行的缓存仍可查看", 503) from exc
+
     async def maintain(self, runtime):
         while True:
             await asyncio.sleep(1)
@@ -687,7 +772,19 @@ class Storage:
                     self.backup_error = "备份失败：" + str(exc)
 
     async def close(self, runtime):
-        await self.flush()
+        # A normal shutdown must drain more than one batch; otherwise the
+        # newest assignments behind 1,000 queued events disappear on restart.
+        deadline = time.monotonic() + 3
+        while self.queue and time.monotonic() < deadline:
+            before = len(self.queue)
+            await self.flush()
+            if len(self.queue) >= before or self.history_error:
+                break
+        if self.queue:
+            self.dropped += len(self.queue)
+            self.queue.clear()
+            self.queue_bytes = 0
+            self.history_error = "关闭时存储不可用或排空超时，未持久化的记录已计入缺口"
         await self.snapshot(runtime)
         closed = True
         for db in (self.telemetry_reader, self.config_db, self.telemetry_db):

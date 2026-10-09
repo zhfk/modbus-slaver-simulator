@@ -5,6 +5,7 @@ import json
 import math
 import random
 import time
+import uuid
 from array import array
 from collections import deque
 from dataclasses import dataclass, field, replace
@@ -85,6 +86,7 @@ class DeviceRuntime:
         self.version = previous.version + 1 if previous else 0
         self.audit_callback = None
         self.trends = {}
+        self.assignments = deque(maxlen=100)
         self.last_trend = 0
         for p in config.points:
             state = PointState(
@@ -118,6 +120,7 @@ class DeviceRuntime:
             previous.error,
         )
         self.clock, self.stamp = previous.clock, previous.stamp
+        self.assignments = previous.assignments
         self.version, self.last_trend = previous.version + 1, previous.last_trend
         for key, p in self.points.items():
             if key in previous.points and previous.points[key].layout() == p.layout():
@@ -179,7 +182,93 @@ class DeviceRuntime:
         st.error = ""
         self.version += 1
 
-    def assign(self, items, source="manual"):
+    def assignment_change(self, key):
+        p = self.points[key]
+        return {
+            "id": key,
+            "name": p.name,
+            "type": p.type,
+            "unit": p.unit,
+            "precision": p.precision,
+            "area": p.area,
+            "address": p.address,
+            "before": safe_number(self.value(key)),
+            "before_raw": self.raw(key),
+        }
+
+    def record_assignment(self, kind, changes, count, **context):
+        if not self.audit_callback:
+            return
+        for change in changes:
+            change["after"] = safe_number(self.value(change["id"]))
+            change["after_raw"] = self.raw(change["id"])
+        self.audit_callback(
+            {
+                "id": f"{time.time_ns():020d}-{uuid.uuid4().hex}",
+                "time": time.time(),
+                "kind": kind,
+                "device": self.config.id,
+                "device_name": self.config.name,
+                "count": count,
+                "changes": changes,
+                "omitted": max(0, count - len(changes)),
+                "outcome": "success",
+                **context,
+            }
+        )
+
+    def failed_assignment(self, kind, message, changes=None, count=0, **context):
+        self.record_assignment(
+            kind,
+            changes or [],
+            count,
+            outcome="failed",
+            error=str(message)[:512],
+            **context,
+        )
+
+    def write_failure(self, pdu, peer, message):
+        fn = pdu[0]
+        area = "coil" if fn in (5, 15) else "holding"
+        offset = 5 if fn == 23 else 1
+        address = (
+            int.from_bytes(pdu[offset : offset + 2], "big")
+            if len(pdu) >= offset + 2
+            else None
+        )
+        count = (
+            (
+                1
+                if fn in (5, 6, 22)
+                else int.from_bytes(pdu[offset + 2 : offset + 4], "big")
+            )
+            if len(pdu) >= offset + 4
+            else 0
+        )
+        keys = []
+        if address is not None:
+            keys = sorted(
+                {
+                    self.owners[area][a]
+                    for a in range(address, min(65536, address + min(count, 1968)))
+                    if a in self.owners[area]
+                }
+            )
+        self.failed_assignment(
+            "external_write",
+            message,
+            [self.assignment_change(key) for key in keys[:20]],
+            len(keys),
+            origin="modbus",
+            host=str(peer[0]) if peer else None,
+            port=peer[1] if peer else None,
+            function=fn,
+            area=area,
+            address=address,
+            request=pdu.hex(),
+        )
+
+    def assign(self, items, source="manual", origin="api"):
         if len(items) > 10000 or len({x["id"] for x in items}) != len(items):
             raise DomainError("赋值列表重复或超过上限")
         prepared = []
@@ -190,10 +279,13 @@ class DeviceRuntime:
                 prepared.append(
                     (item["id"], encode(self.points[item["id"]], item["value"]))
                 )
-            except (ValueError, TypeError) as exc:
+            except (ValueError, TypeError, OverflowError) as exc:
                 raise DomainError(str(exc), details={"point": item["id"]}) from exc
+        changes = [self.assignment_change(key) for key, _ in prepared[:20]]
         for key, words in prepared:
             self.set_raw(key, words, source, write=True)
+        if prepared:
+            self.record_assignment("manual", changes, len(prepared), origin=origin)
 
     def check_range(self, area, address, count):
         ranges = self.config.valid_ranges.get(area)
@@ -212,7 +304,7 @@ class DeviceRuntime:
             raise ProtocolError(2)
         return list(self.values[area][address : address + count])
 
-    def write(self, area, address, words, source):
+    def write(self, area, address, words, source, peer=None, function=None):
         self.check_range(area, address, len(words))
         keys = set()
         for a in range(address, address + len(words)):
@@ -221,6 +313,7 @@ class DeviceRuntime:
                 raise ProtocolError(2)
             keys.add(key)
         old = {key: safe_number(self.value(key)) for key in keys}
+        changes = [self.assignment_change(key) for key in sorted(keys)[:20]]
         self.values[area][address : address + len(words)] = array("H", words)
         for key in keys:
             p, st = self.points[key], self.states[key]
@@ -238,25 +331,18 @@ class DeviceRuntime:
                 else 0
             )
         self.version += 1
-        if self.audit_callback:
-            self.audit_callback(
-                {
-                    "time": time.time(),
-                    "kind": "external_write",
-                    "device": self.config.id,
-                    "area": area,
-                    "address": address,
-                    "raw": words,
-                    "changes": [
-                        {
-                            "id": key,
-                            "before": old[key],
-                            "after": safe_number(self.value(key)),
-                        }
-                        for key in sorted(keys)
-                    ],
-                }
-            )
+        self.record_assignment(
+            "external_write",
+            changes,
+            len(keys),
+            origin="modbus",
+            host=str(peer[0]) if peer else None,
+            port=peer[1] if peer else None,
+            function=function,
+            area=area,
+            address=address,
+            raw=list(words),
+        )
 
     def control_points(self, keys, action):
         if len(set(keys)) != len(keys) or any(key not in self.points for key in keys):
@@ -547,6 +633,7 @@ class Runtime:
         self.capture_bytes = 0
         self.capture_limit = 4 * 1024 * 1024
         self.trend_touch = {}
+        self.config_version = 0
         self.last_trend_cleanup = 0
 
     def prepare(self, config):
@@ -560,6 +647,7 @@ class Runtime:
                 device.inherit(previous[key])
             device.audit_callback = self.audit
         self.devices = candidates
+        self.config_version = config.version
         cached = {key for d in self.devices.values() for key in d.trends}
         self.trend_touch = {
             key: stamp for key, stamp in self.trend_touch.items() if key in cached
@@ -590,6 +678,11 @@ class Runtime:
         return self.devices[key]
 
     def audit(self, event):
+        if event.get("kind") in ("manual", "external_write"):
+            event["config_version"] = self.config_version
+            device = self.devices.get(event["device"])
+            if device:
+                device.assignments.append(event)
         self.events.append(event)
         if self.on_event:
             self.on_event(event)

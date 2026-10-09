@@ -15,6 +15,11 @@ from playwright.async_api import async_playwright, expect
 from simulator.excel import write_workbook
 from simulator.models import Point
 
+if __package__:
+    from .browser_help_check import check_help_and_history
+else:
+    from browser_help_check import check_help_and_history
+
 
 async def run(url, output):
     output = Path(output)
@@ -697,9 +702,26 @@ async def run(url, output):
         variables = page.get_by_label("表达式变量说明", exact=True)
         await expect(variables).to_contain_text("x0 = 启动命令 的当前工程值")
         await expect(variables).to_contain_text("x1 = 随机测试点 的当前工程值")
+        dependencies = page.get_by_label("依赖点位", exact=True)
+        await expect(
+            dependencies.locator(f'option[value="{command_id}"]')
+        ).to_contain_text("x0 · 启动命令")
+        await expect(
+            dependencies.locator(f'option[value="{custom_id}"]')
+        ).to_contain_text("x1 · 随机测试点")
         await page.get_by_label("依赖点位", exact=True).select_option(custom_id)
         await expect(variables).to_contain_text("x0 = 随机测试点 的当前工程值")
         await expect(variables).not_to_contain_text("x1 =")
+        await expect(
+            dependencies.locator(f'option[value="{custom_id}"]')
+        ).to_contain_text("x0 · 随机测试点")
+        await expect(
+            dependencies.locator(f'option[value="{command_id}"]')
+        ).to_contain_text("未选择 · 启动命令")
+        await expect(variables).to_contain_text("x0 * 0.5")
+        await dependencies.select_option([])
+        await expect(variables).not_to_contain_text("x0 =")
+        await expect(variables).to_contain_text("20 + t * 0.5")
         await expect(variables).to_contain_text("累计运行秒数")
         await page.keyboard.press("Escape")
         for mode in ("温控模板（4 个联动点位）", "空设备"):
@@ -1365,6 +1387,7 @@ async def run(url, output):
                 "点位监控",
                 "连接信息",
                 "通信诊断",
+                "赋值历史",
             ]
             await page.get_by_role("button", name="连接信息", exact=True).click()
             panel = page.locator(".connection-panel")
@@ -1515,11 +1538,13 @@ async def run(url, output):
         assert (
             await page.request.post(url + f"/api/devices/{second['id']}/actions/stop")
         ).status == 200
+        new_checks = await check_help_and_history(page, url, output)
         assert not failures, failures
         await browser.close()
     report = {
         "passed": True,
-        "checks": [
+        "checks": new_checks
+        + [
             "point drawer saves a new point while running; actual Excel upload, preview and apply add a point without stopping",
             "running device reset is available in the card menu and restores initial values without stopping communication",
             "expression dependency xN mapping follows selected order and updates after removal, with elapsed-time and syntax guidance",

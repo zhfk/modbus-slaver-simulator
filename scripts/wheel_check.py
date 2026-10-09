@@ -23,6 +23,7 @@ def run(target):
         with TestClient(create_app(Path(data))) as http:
             html = http.get("/devices/overview")
             assert html.status_code == 200 and '<div id="app">' in html.text
+            assert http.get("/help").text == html.text
             assets = re.findall(r'(?:src|href)="(/assets/[^\"]+)"', html.text)
             assert assets and all(
                 http.get(asset).status_code == 200 for asset in assets
@@ -52,11 +53,24 @@ def run(target):
                 assert rows[1]["value"] == 75.25 and rows[1]["raw"] == words
                 assert rows[1]["type"] == "Float32"
                 assert rows[1]["scale"] == 1 and rows[1]["precision"] == 2
+                assert client.write_register(65535, 1, device_id=1).isError()
+                history = http.get(f"/api/devices/{key}/assignments").json()["items"]
+                assert [r["outcome"] for r in history] == ["failed", "success"]
+                assert all(
+                    r["origin"] == "modbus" and r["host"] == "127.0.0.1"
+                    for r in history
+                )
+                assert history[1]["changes"][0]["after"] == 75.25
             finally:
                 client.close()
             assert http.post(f"/api/devices/{key}/actions/stop").status_code == 200
+        with TestClient(create_app(Path(data))) as restarted:
+            assert (
+                restarted.get(f"/api/devices/{key}/assignments").json()["items"]
+                == history
+            )
     print(
-        "Installed wheel passed: SPA, local assets/fonts, API, real Modbus write/read and UI value agreement"
+        "Installed wheel passed: SPA/help, local assets/fonts, API, real Modbus write/read, success/failure history and persistence"
     )
 
 

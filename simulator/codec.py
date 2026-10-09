@@ -30,7 +30,10 @@ def encode(point, value) -> list[int]:
         if value not in (True, False, 0, 1):
             raise ValueError("Bool 只能为开／关或 0／1")
         return [int(bool(value))]
-    value = float(value)
+    try:
+        value = float(value)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError("工程值必须为有效的有限数值") from exc
     if not math.isfinite(value):
         raise ValueError("数值必须有限")
     raw = (value - point.offset) / point.scale

@@ -132,6 +132,8 @@ def create_app(data_dir=None, static_dir=None):
                     await heavy.close()
                     if not await storage.close(runtime):
                         logger.error(storage.error)
+                    if storage.history_error:
+                        logger.warning(storage.history_error)
             except TimeoutError:
                 logger.error("关闭超时，保留实例锁直到进程退出，按异常恢复处理")
             logger.removeHandler(handler)
@@ -395,33 +397,93 @@ def create_app(data_dir=None, static_dir=None):
 
     @app.post("/api/devices/{key}/assign")
     async def assign(key: str, payload: dict):
-        guard()
-        items = payload.get("items")
-        if (
-            not isinstance(items, list)
-            or not items
-            or any(
-                not isinstance(i, dict)
-                or set(i) != {"id", "value"}
-                or not isinstance(i["id"], str)
-                for i in items
-            )
-        ):
-            raise DomainError("需要有效的点位／数值列表")
         device = runtime.get(key)
-        device.assign(items)
-        event = {
-            "time": time.time(),
-            "kind": "manual",
-            "device": key,
-            "points": [i["id"] for i in items[:100]],
-            "count": len(items),
-        }
-        runtime.audit(event)
+        items = payload.get("items")
+        origin = payload.get("origin", "api")
+        try:
+            guard()
+            if (
+                not isinstance(items, list)
+                or not items
+                or any(
+                    not isinstance(i, dict)
+                    or set(i) != {"id", "value"}
+                    or not isinstance(i["id"], str)
+                    for i in items
+                )
+            ):
+                raise DomainError("需要有效的点位／数值列表")
+            if origin not in ("web", "api"):
+                raise DomainError("赋值来源必须为 web 或 api")
+            device.assign(items, origin=origin)
+        except DomainError as exc:
+            changes = []
+            seen = set()
+            for item in items[:20] if isinstance(items, list) else []:
+                if (
+                    isinstance(item, dict)
+                    and isinstance(item.get("id"), str)
+                    and item["id"] in device.points
+                    and item["id"] not in seen
+                ):
+                    seen.add(item["id"])
+                    change = device.assignment_change(item["id"])
+                    value = item.get("value")
+                    change["requested"] = (
+                        value
+                        if isinstance(value, (int, float, bool))
+                        and (not isinstance(value, float) or math.isfinite(value))
+                        and (not isinstance(value, int) or value.bit_length() <= 256)
+                        else str(value)[:128]
+                        if isinstance(value, str)
+                        else "无效数值结构"
+                    )
+                    changes.append(change)
+            device.failed_assignment(
+                "manual",
+                exc.message,
+                changes,
+                len(items) if isinstance(items, list) else 0,
+                origin=origin if origin in ("web", "api") else "api",
+                status=exc.status,
+                omitted=max(0, len(items) - 20) if isinstance(items, list) else 0,
+                requested_ids=[
+                    i["id"][:64]
+                    if isinstance(i, dict) and isinstance(i.get("id"), str)
+                    else "无法解析 ID"
+                    for i in items[:20]
+                ]
+                if isinstance(items, list)
+                else [],
+            )
+            raise
         return {
             "items": [device.view(i["id"]) for i in items],
             "version": device.version,
         }
+
+    @app.get("/api/devices/{key}/assignments")
+    async def assignments(key: str):
+        device = runtime.get(key)
+        recent = list(device.assignments)
+        warning = ""
+        try:
+            saved = await storage().assignments(key)
+        except DomainError as exc:
+            saved, warning = [], exc.message
+        # Pending writes and persisted rows share a stable operation ID.
+        rows = {row["id"]: row for row in saved}
+        rows.update({row["id"]: row for row in recent})
+        result = sorted(
+            rows.values(), key=lambda row: (row["time"], row["id"]), reverse=True
+        )[:100]
+        if storage().history_error or not storage().writable():
+            warning = warning or "持久化降级，仅保证本次运行中尚在缓存的赋值记录"
+        if storage().dropped:
+            warning += f"；存储队列累计丢弃 {storage().dropped} 项，历史可能有缺口"
+        if storage().assignment_pruned:
+            warning += f"；存储预算清理过 {storage().assignment_pruned} 条赋值记录，重启后可能不足 100 条"
+        return {"items": result, "warning": warning}
 
     @app.post("/api/devices/{key}/preview-value")
     async def preview_value(key: str, payload: dict):

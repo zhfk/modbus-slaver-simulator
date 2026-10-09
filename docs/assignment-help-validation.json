@@ -1,0 +1,62 @@
+{
+  "checked_at": "2026-10-10 00:34",
+  "timezone": "Asia/Shanghai",
+  "base_commit": "fea2d61ae4dab4b7bfa6a9341f5ffa05c863a745",
+  "scope": "source-only main; bounded assignment history, dynamic expression labels, full help and interactive guide",
+  "backend": {
+    "passed": 232,
+    "seconds": 60.25,
+    "warnings": 1,
+    "assignment_regressions": 25
+  },
+  "frontend": {
+    "chart_tests_passed": 5,
+    "typecheck_build_passed": true,
+    "format_passed": true
+  },
+  "python_style": {
+    "format_passed": true,
+    "unused_imports_passed": true
+  },
+  "browser": {
+    "passed": true,
+    "checks": 61,
+    "page_errors": [],
+    "report": "artifacts/browser-assignment-help-delivery/browser.json",
+    "final_api_followup_checks": 5,
+    "final_api_followup_report": "artifacts/browser-assignment-help-final-source/focused.json"
+  },
+  "wheel": {
+    "installed_outside_checkout": true,
+    "passed": true,
+    "help_spa": true,
+    "real_float32_two_registers": true,
+    "value": 75.25,
+    "raw": [
+      17046,
+      32768
+    ],
+    "success_failure_history_restart_passed": true
+  },
+  "soak": {
+    "status": "passed",
+    "completed_seconds": 140.627,
+    "requests": 8328,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "e22f18f6420f71e8cab358f81ca6e6c20230aba87fd8319773faeceb8f394d6e",
+    "p99_ms": 15.360625999164768,
+    "failures": [],
+    "queue_dropped": 0,
+    "report": "artifacts/soak-assignment-help-final-source/results/stage-1/report.json"
+  },
+  "source_fingerprint_matches_current": true,
+  "release_published": false,
+  "remaining": [
+    "24/72 hour endurance",
+    "native rebuilds for new source features",
+    "target user desktop systems",
+    "actual LAN and firewall environment"
+  ]
+}
