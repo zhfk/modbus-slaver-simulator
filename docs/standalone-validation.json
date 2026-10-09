@@ -1,13 +1,13 @@
 {
-  "version": "0.2.0rc5",
-  "release_url": "https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5",
-  "source_commit": "3391c00d7d954dfd87f4feb2cd3e2cc30bbc5ece",
+  "version": "0.2.0rc6",
+  "release_url": "https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc6",
+  "source_commit": "b7d730da7d1c64db7cb7b970cce1cfb321cdb87c",
   "download_integrity_passed": true,
   "assets": [
     {
-      "name": "modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz",
-      "bytes": 31422837,
-      "sha256": "86e7603e543eac1e9fba904dbceab80e8eb9faa31c1df86afbc03218b1e1471a",
+      "name": "modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz",
+      "bytes": 31425899,
+      "sha256": "6b07d6b3f2b2943b13b998c3168d8651443c58b83410972cf6fe15f0636c0e7a",
       "platform": "linux",
       "architecture": "x86_64",
       "python": "3.12.15",
@@ -18,9 +18,9 @@
       ]
     },
     {
-      "name": "modbus-simulator-0.2.0rc5-windows-x86_64.zip",
-      "bytes": 17991201,
-      "sha256": "b7cbcd6d9f773f028bcc494cdb441e9ec2a3286d1eb41e7ff7c39451897c5f54",
+      "name": "modbus-simulator-0.2.0rc6-windows-x86_64.zip",
+      "bytes": 17996005,
+      "sha256": "5d685fca2a29ab7f00fc9727a3a536c3539803b590276561ed974d6b56a21e6f",
       "platform": "windows",
       "architecture": "x86_64",
       "python": "3.12.10",
@@ -31,9 +31,9 @@
       ]
     },
     {
-      "name": "modbus-simulator-0.2.0rc5-macos-arm64.tar.gz",
-      "bytes": 16536774,
-      "sha256": "e499dae11fb00b5203ef92fa450d8e16c94da7df2d7fc39a52b3b8a22ab2f717",
+      "name": "modbus-simulator-0.2.0rc6-macos-arm64.tar.gz",
+      "bytes": 16540864,
+      "sha256": "275d6c64853f50f559f9c96dfaca28d9653a58404ab79d57baa45d1ca80f6f9e",
       "platform": "macos",
       "architecture": "arm64",
       "python": "3.12.10",
@@ -46,10 +46,10 @@
   ],
   "downloaded_linux_check": {
     "passed": true,
-    "version": "0.2.0rc5",
-    "checked_at_utc": "2026-10-09T08:12:40.411614+00:00",
+    "version": "0.2.0rc6",
+    "checked_at_utc": "2026-10-09T08:56:01.599824+00:00",
     "checks": [
-      "bundled page/assets/fonts and deep links without system Python/PATH",
+      "bundled page/assets/fonts, deep links and actual data directory without system Python/PATH",
       "three devices share one endpoint with isolated Unit IDs, values and stop",
       "real WebSocket snapshot from bundled protocol adapter",
       "spawned Excel export/import workers and temporary cleanup",
@@ -57,35 +57,61 @@
       "offline compact and backup restore with bundled SQLite"
     ]
   },
-  "checked_at_utc": "2026-10-09T08:13:36.810117+00:00",
-  "workflow_url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363",
+  "checked_at_utc": "2026-10-09T08:57:11.073507+00:00",
+  "workflow_url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514",
   "native_jobs": [
     {
-      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363/job/113730436741",
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514/job/113744918194",
       "status": "completed successfully",
       "name": "build (macos-15, macos, arm64)"
     },
     {
-      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363/job/113730437089",
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514/job/113744918205",
       "status": "completed successfully",
       "name": "build (ubuntu-22.04, linux, x86_64)"
     },
     {
-      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363/job/113730436998",
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514/job/113744917963",
       "status": "completed successfully",
       "name": "build (windows-2022, windows, x86_64)"
     }
   ],
+  "downloaded_linux_browser_check": {
+    "passed": true,
+    "checks": [
+      "actual read-only storage directory at 1440/1024/390 widths",
+      "right drawer preserves workspace width and scroll, locks background and restores focus",
+      "device creation",
+      "start/stop",
+      "assignment preview",
+      "assignment confirmation",
+      "pause/resume",
+      "point edit",
+      "point creation",
+      "advanced strategy edit and parameter deletion persist",
+      "advanced-only draft requires discard confirmation",
+      "slow polling has at most one request",
+      "invalid edit retains draft",
+      "keyboard Escape and focus return",
+      "real-time trend",
+      "diagnostics",
+      "1440/1024/390 layout",
+      "local font",
+      "external network blocked",
+      "SPA deep link"
+    ],
+    "page_errors": []
+  },
   "short_load": {
     "status": "passed",
-    "completed_seconds": 140.576,
-    "requests": 8322,
+    "completed_seconds": 140.646,
+    "requests": 8316,
     "ui_frames": 140,
     "ui_reconnections": 5,
     "device_restarts": 1,
-    "source_sha256": "f95a6192fbce253760c4c774abf72e4980ce4fbfcd9d10aee6aad7bccbe680b0",
-    "p99_ms": 25.18315899942536,
-    "version": "0.2.0rc4"
+    "source_sha256": "3ae25da394b8ea9ac12f5e1077e29bf7b763310be9f8de39fcab0d045d1ccd28",
+    "p99_ms": 16.886936005903408,
+    "version": "0.2.0rc6"
   },
   "pending_acceptance": [
     "24-hour and 72-hour endurance gates",

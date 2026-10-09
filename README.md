@@ -10,7 +10,7 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 | [源码启动](#源码启动) | 修改代码、本地开发和自行构建 | Python 3.12、Node.js 22.12+、Git |
 | [wheel 部署](#wheel-部署需-python与升级) | 已有 Python 环境，自行分发安装包 | Python 3.12 和对应平台依赖 |
 
-当前版本为 `0.2.0rc6` 功能预发布。三个发布目标通过原生检查后才上传，长期运行验收尚未通过；详细证据见 [验收记录](docs/acceptance.md)。
+当前版本为 `0.2.0rc6` 功能预发布。三个发布目标已通过原生检查和下载校验，长期运行验收尚未通过；详细证据见 [验收记录](docs/acceptance.md)。
 
 ## Release 包启动（推荐）
 

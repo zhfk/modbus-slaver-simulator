@@ -27,14 +27,15 @@
 
 - 后端检查 112 项通过，42.97 秒；新增默认目录、环境变量、自定义相对目录的实际路径验证。前端 TypeScript／Vite 构建通过。
 - Chromium 20 项检查通过，无页面脚本错误；1440／1024／390px 下存储目录可见，路径包含中文及 `#`。实际滚动页面中打开右侧抽屉，主区位置与宽度不变，背景不能滚动，正文独立滚动，Esc 关闭后恢复原焦点和滚动位置。截图与报告保留于 `artifacts/drawer-storage-browser-final/`。
-- 三平台发布验证待执行，以对应版本的 GitHub Actions 和下载校验记录为准。
+- 三个平台原生回归、构建与解压包检查全部通过；[v0.2.0rc6 已发布](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc6)，[Actions 证据](https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514)。实际下载三个文件，SHA256、版本、平台及源码提交校验通过。下载的官方 Linux 包完成 6 组独立包检查及全部 20 项浏览器检查，含存储路径与抽屉行为，报告见 [standalone-validation.json](standalone-validation.json)。
+- 当前 wheel 在仓库外安装后，页面、字体、管理 API 与实际 Modbus TCP 读写检查通过。140.646 秒混合负载完成 8316 次请求、5 次实时订阅重连和 1 次设备重启，P99 16.887ms，无失败；只能作为短时验证，不能替代长期门槛。
 
 ## 独立包验证（0.2.0rc5）
 
 - 本轮应用回归 **109 项通过**，41.73 秒，包含备份轮换前释放 SQLite 连接的回归；前端 TypeScript／Vite 构建通过。
 - Linux 本机构建约 20MiB 压缩包，解压至仓库外，在清空 `PATH`／Python 路径环境后实际运行；三台从机 Unit ID 1／2／3 共用端点，读写及 API 值一致，停止一台后其他两台仍可读写；WebSocket、冻结 Excel 导入／导出、监督器和离线压缩／恢复检查通过。
 - `v0.2.0rc5` 的 Linux x86_64（Ubuntu 22.04／glibc 2.35）、Windows x64（Server 2022）、macOS Apple Silicon（macOS 15）全部完成原生后端回归、前端构建及仓库外解压包检查。[GitHub Actions 证据](https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363)，发布不再等待 Intel macOS。
-- 已从 [GitHub 预发布](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5) 实际下载三个文件，逐个核对 SHA256、版本、OS／架构、源码提交与干净构建标记；下载的官方 Linux 包再次通过三设备／页面／WebSocket／Excel／监督及维护检查。机器可读记录：[standalone-validation.json](standalone-validation.json)。
+- 已从 [GitHub 预发布](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5) 实际下载三个文件，逐个核对 SHA256、版本、OS／架构、源码提交与干净构建标记；下载的官方 Linux 包再次通过三设备／页面／WebSocket／Excel／监督及维护检查。该版本记录保留在 Git 历史中；[standalone-validation.json](standalone-validation.json) 记录最新版本。
 - 调整发布目标前的 `v0.2.0rc4` 已完成三种所需平台的原生回归和解压包检查；同版 140.576 秒混合负载、8322 次请求、5 次实时订阅重连及 1 次设备重启通过，P99 25.183ms。按用户最新要求，后续流水线和发布包只保留 Linux x86_64、Windows x64、macOS Apple Silicon。
 - 此版本为功能预发布，耐久失败、目标用户系统和跨机器 LAN 验收仍未完成。
 
