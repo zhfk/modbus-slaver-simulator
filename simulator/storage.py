@@ -382,7 +382,9 @@ class Storage:
                             ).fetchone()
                         )
                         recovered = (
-                            Configuration.model_validate_json(row[0])
+                            Configuration.model_validate_json(
+                                row[0], context={"allow_legacy_endpoint_overlap": True}
+                            )
                             if row
                             else self.config
                         )

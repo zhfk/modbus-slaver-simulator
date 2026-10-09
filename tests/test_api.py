@@ -334,6 +334,86 @@ def test_legacy_endpoint_overlap_remains_editable_after_restart(tmp_path):
         assert saved["devices"][1]["unit_id"] == 2
 
 
+@pytest.mark.parametrize("activation_failure", [False, True])
+def test_delete_legacy_overlap_preserves_remaining_devices_and_recovers(
+    tmp_path, monkeypatch, activation_failure
+):
+    import sqlite3
+    from contextlib import closing
+
+    with TestClient(create_app(tmp_path)) as http:
+        key = template(http)
+        old = http.get("/api/config").json()
+    removed_point = old["devices"][0]["points"][0]["id"]
+    old["devices"].extend(
+        [
+            {"id": "wildcard-one", "host": "0.0.0.0", "unit_id": 1, "points": []},
+            {"id": "loopback-two", "host": "127.0.0.1", "unit_id": 2, "points": []},
+            {"id": "wildcard-two", "host": "0.0.0.0", "unit_id": 2, "points": []},
+        ]
+    )
+    old["settings"]["history_points"] = [removed_point]
+    with closing(sqlite3.connect(tmp_path / "config.db")) as conn, conn:
+        conn.execute("UPDATE config SET data=? WHERE id=1", (json.dumps(old),))
+    with TestClient(create_app(tmp_path)) as http:
+        before = http.get("/api/config").json()
+        assert http.put("/api/config", json=before).status_code == 422
+        if activation_failure:
+            runtime = http.app.state.runtime
+            original = runtime.apply
+            attempts = []
+
+            def fail_once(config):
+                attempts.append(config.version)
+                if len(attempts) == 1:
+                    raise RuntimeError("injected activation failure")
+                return original(config)
+
+            monkeypatch.setattr(runtime, "apply", fail_once)
+        response = http.delete(f"/api/devices/{key}?version={before['version']}")
+        assert response.status_code == (503 if activation_failure else 200), (
+            response.text
+        )
+        after = http.get("/api/config").json()
+        assert after["version"] == before["version"] + 1
+        assert after["devices"] == before["devices"][1:]
+        assert after["settings"]["history_points"] == []
+        assert len(http.get("/api/devices").json()) == 3
+        assert http.get("/api/health/ready").status_code == 200
+        # Removal cannot be used to introduce a conflicting endpoint via ordinary saves.
+        assert http.put("/api/config", json=after).status_code == 422
+        assert (
+            http.delete(
+                f"/api/devices/wildcard-one?version={before['version']}"
+            ).status_code
+            == 409
+        )
+        assert http.get("/api/config").json() == after
+    with TestClient(create_app(tmp_path)) as http:
+        assert http.get("/api/config").json() == after
+        assert len(http.get("/api/devices").json()) == 3
+
+
+@pytest.mark.parametrize("status", ["running", "starting", "stopping"])
+def test_delete_requires_stopped_device_and_current_version(client, status):
+    key = template(client)
+    before = client.get("/api/config").json()
+    runtime = client.app.state.runtime
+    runtime.get(key).status = status
+    try:
+        assert client.delete(f"/api/devices/{key}?version=1").status_code == 409
+        assert client.delete(f"/api/devices/{key}?version=0").status_code == 409
+        assert client.delete(f"/api/devices/{key}").status_code == 422
+        assert client.delete("/api/devices/missing?version=1").status_code == 404
+        assert client.get("/api/config").json() == before
+    finally:
+        runtime.get(key).status = "stopped"
+    response = client.delete(f"/api/devices/{key}?version=1")
+    assert response.status_code == 200, response.text
+    assert response.json()["devices"] == []
+    assert client.get("/api/devices").json() == []
+
+
 def test_disabled_history_still_exports_existing_samples(client):
     from openpyxl import load_workbook
     from io import BytesIO

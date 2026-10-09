@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import psutil
-from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Query, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import ValidationError
@@ -162,9 +162,11 @@ def create_app(data_dir=None, static_dir=None):
     def storage():
         return context["storage"]
 
-    def configured(payload):
+    def configured(payload, *, allow_legacy_overlap=False):
         try:
-            return Configuration.model_validate(payload)
+            return Configuration.model_validate(
+                payload, context={"allow_legacy_endpoint_overlap": allow_legacy_overlap}
+            )
         except ValidationError as exc:
             raise DomainError(
                 "配置校验失败",
@@ -256,6 +258,27 @@ def create_app(data_dir=None, static_dir=None):
     @app.get("/api/devices")
     async def get_devices():
         return [device_view(d) for d in runtime.devices.values()]
+
+    @app.delete("/api/devices/{key}")
+    async def delete_device(key: str, version: int = Query(..., ge=0)):
+        guard()
+        current = storage().config.model_dump()
+        if version != current["version"]:
+            raise DomainError("配置已被其他操作修改，请刷新后比较", 409)
+        target = runtime.get(key)
+        if target.status not in ("stopped", "fault"):
+            raise DomainError(f"请先停止设备：{target.config.name}", 409)
+        removed = {point.id for point in target.config.points}
+        current["devices"] = [item for item in current["devices"] if item["id"] != key]
+        current["settings"]["history_points"] = [
+            point
+            for point in current["settings"]["history_points"]
+            if point not in removed
+        ]
+        # Only remove a device from the server's current configuration. Existing
+        # legacy overlap may remain, but this endpoint cannot introduce a new one.
+        result = await save(configured(current, allow_legacy_overlap=True))
+        return result.model_dump()
 
     @app.get("/api/devices/{key}/points")
     async def get_points(

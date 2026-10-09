@@ -11,6 +11,8 @@
   --secondary: #32313a;
   --muted: #848e9c;
   --accent: #f0b90b;
+  --running: #16803c;
+  --fault: #d32f2f;
 }
 * {
   box-sizing: border-box;
@@ -177,12 +179,13 @@ pre {
   flex-direction: column;
   gap: 2px;
   margin: 8px 0;
-  padding: 12px 38px 12px 12px;
+  padding: 12px 38px 12px 9px;
+  border-left: 4px solid var(--device-state, var(--muted));
 }
 .device-link.active {
-  border-color: var(--ink);
-  border-left: 4px solid var(--accent);
-  padding-left: 9px;
+  border-top-color: var(--ink);
+  border-right-color: var(--ink);
+  border-bottom-color: var(--ink);
 }
 .device-link small {
   font-size: 16px;
@@ -1011,4 +1014,68 @@ tr.selected > td:first-child {
   .points-table th {
     padding: 10px 8px;
   }
+}
+
+.device-link[data-status="running"] {
+  --device-state: var(--running);
+}
+.device-link[data-status="stopped"] {
+  --device-state: var(--accent);
+}
+.device-link[data-status="fault"] {
+  --device-state: var(--fault);
+}
+.device-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 0 5px 8px;
+  font-size: 16px;
+}
+.device-summary strong {
+  flex-basis: 100%;
+}
+.point-operations {
+  white-space: nowrap;
+}
+.trend-drag-handle {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  border-radius: 8px;
+}
+.trend-drag-handle.dragging {
+  cursor: grabbing;
+}
+.trend-drag-handle:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+.chart-axis {
+  flex-wrap: nowrap;
+  gap: 0;
+  margin-left: 2.857%;
+  margin-right: 2.857%;
+}
+.chart-tick {
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+}
+.identity-help {
+  margin: 8px 0 16px;
+  color: var(--secondary);
+}
+@media (max-width: 600px) {
+  .chart-tick:not(.mobile-tick) {
+    display: none;
+  }
+}
+
+.tick-date {
+  display: block;
+  text-align: center;
+}
+
+.device-link:hover:not(:disabled) {
+  border-left-color: var(--device-state, var(--muted));
 }

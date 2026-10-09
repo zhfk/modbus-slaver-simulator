@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import shutil
+import socket
 from io import BytesIO
 from openpyxl import load_workbook
 from pathlib import Path
@@ -104,6 +105,56 @@ async def run(url, output):
         ).to_be_visible()
         await expect(
             page.get_by_role("button", name="目标温度", exact=True)
+        ).to_be_visible()
+        summary = page.get_by_label("设备状态汇总", exact=True)
+        await expect(summary).to_contain_text("共 1 台")
+        await expect(summary).to_contain_text("停止 1")
+        card = page.locator(".device-link").filter(has_text="验收温控设备")
+        await expect(card).to_have_css("border-left-color", "rgb(240, 185, 11)")
+        address = (
+            page.get_by_role("row")
+            .filter(has=page.get_by_role("button", name="目标温度", exact=True))
+            .locator("td")
+            .nth(2)
+        )
+        await expect(address).to_contain_text("保持寄存器")
+        # Reproduce an actual occupied TCP port, rather than mocking fault state.
+        with socket.socket() as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen()
+            current = await (await page.request.get(url + "/api/config")).json()
+            current["devices"].append(
+                {
+                    "id": "browser-fault",
+                    "name": "端口占用测试",
+                    "host": "127.0.0.1",
+                    "port": occupied.getsockname()[1],
+                    "unit_id": 1,
+                    "points": [],
+                }
+            )
+            response = await page.request.put(url + "/api/config", data=current)
+            assert response.status == 200, await response.text()
+            response = await page.request.post(
+                url + "/api/devices/browser-fault/actions/start"
+            )
+            assert response.status >= 400
+            await expect(summary).to_contain_text("共 2 台")
+            await expect(summary).to_contain_text("故障 1")
+            fault_card = page.locator(".device-link").filter(has_text="端口占用测试")
+            await expect(fault_card).to_have_css(
+                "border-left-color", "rgb(211, 47, 47)"
+            )
+            await expect(fault_card).to_contain_text("启动故障")
+            current = await (await page.request.get(url + "/api/config")).json()
+            response = await page.request.delete(
+                url + f"/api/devices/browser-fault?version={current['version']}"
+            )
+            assert response.status == 200, await response.text()
+        await expect(summary).to_contain_text("共 1 台")
+        await page.reload()
+        await expect(
+            page.get_by_role("heading", name="验收温控设备", exact=True)
         ).to_be_visible()
         # Status and feedback live in the browser top layer, with no page reflow.
         for width in (1440, 1024, 390):
@@ -240,6 +291,12 @@ async def run(url, output):
         await expect(
             page.locator(".device-link").filter(has_text="验收温控设备")
         ).to_contain_text("运行中")
+        await expect(
+            page.locator(".device-link").filter(has_text="验收温控设备")
+        ).to_have_css("border-left-color", "rgb(22, 128, 60)")
+        await expect(page.get_by_label("设备状态汇总", exact=True)).to_contain_text(
+            "运行 1"
+        )
         row = page.get_by_role("row").filter(
             has=page.get_by_role("button", name="目标温度", exact=True)
         )
@@ -346,7 +403,14 @@ async def run(url, output):
             )
             await trigger.scroll_into_view_if_needed()
             height = (await page.locator(".monitor-panel").bounding_box())["height"]
-            await trigger.click()
+            dedicated = page.get_by_role(
+                "button", name="目标温度设定：查看趋势", exact=True
+            )
+            await expect(dedicated).to_be_visible()
+            assert not await dedicated.evaluate(
+                "button => Boolean(button.closest('.point-menu'))"
+            )
+            await (dedicated if width == 1024 else trigger).click()
             popup = page.locator("#point-trend-popover:popover-open")
             await expect(popup).to_be_visible()
             await expect(popup.locator(".chart")).to_have_count(1)
@@ -360,10 +424,71 @@ async def run(url, output):
             assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= (
                 1000 if width > 500 else 844
             )
+            await expect(popup.locator(".chart-tick")).to_have_count(7)
+            visible_ticks = await popup.locator(".chart-tick").evaluate_all(
+                "ticks => ticks.filter(tick => getComputedStyle(tick).display !== 'none').length"
+            )
+            assert visible_ticks == (3 if width < 600 else 7)
+            handle = popup.get_by_role(
+                "button", name="移动实时趋势窗口，方向键移动，Shift 加速", exact=True
+            )
+            grip = await handle.bounding_box()
+            # Move toward the available vertical space on every screen size.
+            dy = -50 if bounds["y"] > 70 else 50
+            await page.mouse.move(grip["x"] + 20, grip["y"] + 12)
+            await page.mouse.down()
+            await page.mouse.move(grip["x"] + 20, grip["y"] + 12 + dy, steps=8)
+            await page.mouse.up()
+            moved = await popup.bounding_box()
+            assert abs(moved["y"] - bounds["y"]) >= 20, (bounds, moved)
+            await page.wait_for_timeout(1100)
+            assert abs((await popup.bounding_box())["y"] - moved["y"]) < 1
+            await handle.focus()
+            await page.keyboard.press("Shift+ArrowDown")
+            key_moved = await popup.bounding_box()
+            assert key_moved["y"] >= moved["y"]
+            for _ in range(25):
+                await page.keyboard.press("Shift+ArrowRight")
+            clamped = await popup.bounding_box()
+            assert clamped["x"] >= 8 and clamped["x"] + clamped["width"] <= width - 8
+            assert (await page.locator(".monitor-panel").bounding_box())[
+                "height"
+            ] == height
+            if width == 390:
+                session = await page.context.new_cdp_session(page)
+                try:
+                    await session.send(
+                        "Emulation.setTouchEmulationEnabled",
+                        {"enabled": True, "maxTouchPoints": 1},
+                    )
+                    grip = await handle.bounding_box()
+                    before_touch = await popup.bounding_box()
+                    dy = -35 if before_touch["y"] > 50 else 35
+                    x, y = grip["x"] + 20, grip["y"] + 12
+                    await session.send(
+                        "Input.dispatchTouchEvent",
+                        {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]},
+                    )
+                    await session.send(
+                        "Input.dispatchTouchEvent",
+                        {"type": "touchMove", "touchPoints": [{"x": x, "y": y + dy}]},
+                    )
+                    await session.send(
+                        "Input.dispatchTouchEvent",
+                        {"type": "touchEnd", "touchPoints": []},
+                    )
+                    assert (
+                        abs((await popup.bounding_box())["y"] - before_touch["y"]) >= 20
+                    )
+                finally:
+                    await session.send(
+                        "Emulation.setTouchEmulationEnabled", {"enabled": False}
+                    )
+                    await session.detach()
             await page.screenshot(path=str(output / f"trend-popover-{width}.png"))
             await page.keyboard.press("Escape")
             await expect(popup).to_have_count(0)
-            await expect(trigger).to_be_focused()
+            await expect(dedicated if width == 1024 else trigger).to_be_focused()
             await page.screenshot(
                 path=str(output / f"width-{width}.png"), full_page=True
             )
@@ -497,6 +622,23 @@ async def run(url, output):
         ).to_be_visible()
         await device_action("共享端点第二台", "编辑设备")
         dialog = page.get_by_role("dialog")
+        for label in (
+            "1 · 读线圈",
+            "2 · 读离散输入",
+            "3 · 读保持寄存器",
+            "4 · 读输入寄存器",
+            "5 · 写单线圈",
+            "6 · 写单保持寄存器",
+            "15 · 写多个线圈",
+            "16 · 写多个保持寄存器",
+            "22 · 掩码写保持寄存器",
+            "23 · 读写多个保持寄存器",
+        ):
+            await expect(
+                dialog.get_by_role("checkbox", name=label, exact=True)
+            ).to_have_count(1)
+        await expect(dialog.locator(".identity-help")).to_contain_text("14 是 MEI 类型")
+        await expect(dialog.locator(".identity-help")).to_contain_text("不读写点位")
         await dialog.get_by_label("Unit ID", exact=True).fill("1")
         before = await (await page.request.get(url + "/api/config")).json()
         await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
@@ -834,6 +976,9 @@ async def run(url, output):
     report = {
         "passed": True,
         "checks": [
+            "device status colors and live counts, including real TCP bind failure and fault-device deletion",
+            "dedicated trend action, pointer and keyboard dragging clamped to viewport, position retained during refresh",
+            "seven desktop time ticks and three mobile ticks with Chinese protocol address and function/identity descriptions",
             "actual read-only storage directory at 1440/1024/390 widths",
             "right drawer preserves workspace width and scroll, locks background and restores focus",
             "device creation",

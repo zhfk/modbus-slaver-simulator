@@ -218,6 +218,32 @@ const statusNames: Row = {
   error: "策略错误",
   idle: "无周期策略",
 };
+const deviceCounts = computed(() => {
+  const counts: Row = { running: 0, stopped: 0, fault: 0, transition: 0 };
+  for (const d of devices.value) {
+    const state = d.status in counts ? d.status : "transition";
+    counts[state]++;
+  }
+  return counts;
+});
+const areaDescriptions: Row = {
+  coil: "线圈",
+  discrete: "离散输入",
+  holding: "保持寄存器",
+  input: "输入寄存器",
+};
+const functionDescriptions: Row = {
+  1: "读线圈",
+  2: "读离散输入",
+  3: "读保持寄存器",
+  4: "读输入寄存器",
+  5: "写单线圈",
+  6: "写单保持寄存器",
+  15: "写多个线圈",
+  16: "写多个保持寄存器",
+  22: "掩码写保持寄存器",
+  23: "读写多个保持寄存器",
+};
 const areaNames: Row = {
   coil: "Coil",
   discrete: "DI",
@@ -922,12 +948,14 @@ async function removeDevice(key = deviceId.value) {
   if (!confirm(`删除 ${target.name} 及全部点位和依赖配置？必须先停止设备。`))
     return;
   await action(async () => {
-    const candidate = clone(config.value);
-    const ids = new Set(target.points.map((p: Row) => p.id));
-    candidate.devices = candidate.devices.filter((d: Row) => d.id !== key);
-    candidate.settings.history_points =
-      candidate.settings.history_points.filter((id: string) => !ids.has(id));
-    await saveConfig(candidate);
+    config.value = await request(
+      `/api/devices/${key}?version=${config.value.version}`,
+      { method: "DELETE" },
+    );
+    await refreshDevices();
+    await loadPoints();
+    deviceMemory.delete(key);
+    notice.value = `${target.name} 已删除，配置版本 ${config.value.version} 已生效`;
   });
 }
 function defaultPoint(): Row {
@@ -1281,13 +1309,16 @@ async function exportData(kind: string) {
     notice.value = "导出完成";
   });
 }
-async function viewTrend(point: Row) {
+async function viewTrend(point: Row, event?: Event) {
   closeRuntimeStatus();
   closeDeviceMenu();
   trendKeys.value = [point.id];
   trendData.value = {};
   pauseChart.value = false;
-  trendAnchor = document.getElementById(`point-value-${point.id}`);
+  trendAnchor =
+    event?.currentTarget instanceof HTMLElement
+      ? event.currentTarget
+      : document.getElementById(`point-value-${point.id}`);
   showTrend.value = true;
   await nextTick();
   const popup = document.getElementById("point-trend-popover");
@@ -1299,6 +1330,7 @@ async function viewTrend(point: Row) {
   await poll();
 }
 function closeTrend() {
+  endTrendDrag();
   const popup = document.getElementById("point-trend-popover");
   if (popup?.matches(":popover-open")) popup.hidePopover();
   showTrend.value = false;
@@ -1310,6 +1342,88 @@ function trendToggled(event: Event) {
   if (popup.matches(":popover-open")) {
     if (trendAnchor) placePopover(popup, trendAnchor);
   } else closeTrend();
+}
+let trendDrag: {
+  pointer: number;
+  handle: HTMLElement;
+  x: number;
+  y: number;
+  left: number;
+  top: number;
+} | null = null;
+function moveTrend(left: number, top: number) {
+  const popup = document.getElementById("point-trend-popover");
+  if (!popup?.matches(":popover-open")) return;
+  const bounds = popup.getBoundingClientRect();
+  popup.style.left = `${Math.max(8, Math.min(left, innerWidth - bounds.width - 8))}px`;
+  popup.style.top = `${Math.max(8, Math.min(top, innerHeight - bounds.height - 8))}px`;
+}
+function startTrendDrag(event: PointerEvent) {
+  if (event.button !== 0) return;
+  const handle = event.currentTarget as HTMLElement;
+  const popup = document.getElementById("point-trend-popover");
+  if (!popup) return;
+  const bounds = popup.getBoundingClientRect();
+  trendDrag = {
+    pointer: event.pointerId,
+    handle,
+    x: event.clientX,
+    y: event.clientY,
+    left: bounds.left,
+    top: bounds.top,
+  };
+  handle.setPointerCapture(event.pointerId);
+  handle.classList.add("dragging");
+  event.preventDefault();
+}
+function dragTrend(event: PointerEvent) {
+  if (!trendDrag || event.pointerId !== trendDrag.pointer) return;
+  moveTrend(
+    trendDrag.left + event.clientX - trendDrag.x,
+    trendDrag.top + event.clientY - trendDrag.y,
+  );
+}
+function endTrendDrag(event?: PointerEvent) {
+  if (!trendDrag || (event && event.pointerId !== trendDrag.pointer)) return;
+  const { handle, pointer } = trendDrag;
+  trendDrag = null;
+  handle.classList.remove("dragging");
+  if (handle.hasPointerCapture(pointer)) handle.releasePointerCapture(pointer);
+}
+function keyboardMoveTrend(event: KeyboardEvent) {
+  const offsets: Row = {
+    ArrowLeft: [-1, 0],
+    ArrowRight: [1, 0],
+    ArrowUp: [0, -1],
+    ArrowDown: [0, 1],
+  };
+  const delta = offsets[event.key];
+  const popup = document.getElementById("point-trend-popover");
+  if (!delta || !popup) return;
+  event.preventDefault();
+  const bounds = popup.getBoundingClientRect();
+  const step = event.shiftKey ? 40 : 10;
+  moveTrend(bounds.left + delta[0] * step, bounds.top + delta[1] * step);
+}
+function chartTicks(key: string) {
+  const data = trendData.value[key] as [number, number | null][] | undefined;
+  if (!data?.length) return [];
+  const first = data[0]![0],
+    last = data.at(-1)![0];
+  const count = last > first ? 7 : 1;
+  const crossDate =
+    new Date(first * 1000).toDateString() !==
+    new Date(last * 1000).toDateString();
+  return Array.from({ length: count }, (_, i) => {
+    const time = first + ((last - first) * i) / Math.max(1, count - 1);
+    const date = new Date(time * 1000);
+    return {
+      label: clock(time),
+      date: crossDate ? `${date.getMonth() + 1}/${date.getDate()}` : "",
+      full: date.toLocaleString(),
+      index: i,
+    };
+  });
 }
 function chartPath(key: string) {
   const data = (trendData.value[key] as [number, number | null][]) || [];
@@ -1326,7 +1440,7 @@ function chartPath(key: string) {
         open = false;
         return "";
       }
-      const x = 20 + ((t - first) / Math.max(1, last - first)) * 660,
+      const x = 20 + ((t - first) / Math.max(0.001, last - first)) * 660,
         y = 115 - ((v - min) / Math.max(0.001, max - min)) * 95;
       const part = `${open ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`;
       open = true;
@@ -1409,6 +1523,7 @@ onMounted(async () => {
   timer = window.setInterval(poll, 1000);
 });
 onUnmounted(() => {
+  endTrendDrag();
   lockBackground(false);
   clearInterval(timer);
   socket?.close();
@@ -1430,6 +1545,15 @@ onUnmounted(() => {
         <span>设备工作区</span
         ><button aria-label="新建设备" @click="openModal('new')">＋</button>
       </div>
+      <div class="device-summary" aria-label="设备状态汇总">
+        <strong>共 {{ devices.length }} 台</strong>
+        <span>运行 {{ deviceCounts.running }}</span
+        ><span>停止 {{ deviceCounts.stopped }}</span
+        ><span>故障 {{ deviceCounts.fault }}</span>
+        <span v-if="deviceCounts.transition"
+          >切换中 {{ deviceCounts.transition }}</span
+        >
+      </div>
       <nav aria-label="设备列表">
         <div
           v-for="d in devices"
@@ -1440,6 +1564,7 @@ onUnmounted(() => {
           <button
             :id="`device-card-${d.id}`"
             class="device-link"
+            :data-status="d.status"
             :class="{ active: d.id === deviceId }"
             aria-haspopup="menu"
             :aria-expanded="deviceMenuOpen && deviceMenuId === d.id"
@@ -1647,7 +1772,12 @@ onUnmounted(() => {
                     />
                   </th>
                   <th>名称</th>
-                  <th class="mobile-secondary">协议地址</th>
+                  <th
+                    class="mobile-secondary"
+                    title="协议地址从 0 开始；Coil：线圈，DI：离散输入，HR：保持寄存器，IR：输入寄存器"
+                  >
+                    协议地址<span class="cell-note">数据区 · 零起始偏移</span>
+                  </th>
                   <th class="optional">类型</th>
                   <th class="numeric">当前值 / 单位</th>
                   <th class="mobile-secondary">策略 / 状态</th>
@@ -1677,12 +1807,15 @@ onUnmounted(() => {
                       {{ p.name }}</button
                     ><span v-if="p.group" class="cell-note">{{ p.group }}</span
                     ><span class="mobile-point-note"
-                      >{{ areaNames[p.area] }} · {{ p.address }} /
-                      {{ statusNames[p.state] }}</span
+                      >{{ areaNames[p.area] }} {{ areaDescriptions[p.area] }} ·
+                      {{ p.address }} / {{ statusNames[p.state] }}</span
                     >
                   </td>
                   <td class="mono mobile-secondary">
-                    {{ areaNames[p.area] }} · {{ p.address }}
+                    {{ areaNames[p.area] }} · {{ p.address
+                    }}<span class="cell-note">{{
+                      areaDescriptions[p.area]
+                    }}</span>
                   </td>
                   <td class="optional">{{ p.type }}</td>
                   <td class="numeric live-value">
@@ -1716,8 +1849,16 @@ onUnmounted(() => {
                   <td class="optional">
                     {{ p.writable ? "主机可写" : "主机只读" }}
                   </td>
-                  <td>
+                  <td class="point-operations">
                     <button class="small" @click="openAssign([p])">赋值</button>
+                    <button
+                      :id="`point-trend-${p.id}`"
+                      class="small"
+                      :aria-label="`${p.name}：查看趋势`"
+                      @click="viewTrend(p, $event)"
+                    >
+                      查看趋势
+                    </button>
                     <button
                       :id="`point-more-${p.id}`"
                       class="small row-menu"
@@ -1741,7 +1882,6 @@ onUnmounted(() => {
                         :disabled="p.value == null"
                       >
                         当前值设为初始值</button
-                      ><button @click="viewTrend(p)">查看趋势</button
                       ><button @click="pointAction('pause', [p.id])">
                         暂停策略</button
                       ><button @click="deletePoints([p.id])">删除点位</button>
@@ -1775,9 +1915,20 @@ onUnmounted(() => {
           @toggle="trendToggled"
         >
           <div class="section-title">
-            <div>
+            <div
+              class="trend-drag-handle"
+              role="button"
+              tabindex="0"
+              aria-label="移动实时趋势窗口，方向键移动，Shift 加速"
+              @pointerdown="startTrendDrag"
+              @pointermove="dragTrend"
+              @pointerup="endTrendDrag"
+              @pointercancel="endTrendDrag"
+              @lostpointercapture="endTrendDrag"
+              @keydown="keyboardMoveTrend"
+            >
               <h2 id="trend-title">实时趋势</h2>
-              <p>当前点位 · 最近 600 个采样 · 实时缓存</p>
+              <p>拖动标题移动 · 当前点位 · 最近 600 个采样</p>
             </div>
             <div class="button-row">
               <button @click="pauseChart = !pauseChart">
@@ -1811,16 +1962,17 @@ onUnmounted(() => {
               <path class="axis" d="M20 10V120H690" />
               <path class="signal" :d="chartPath(key)" />
             </svg>
-            <div class="chart-axis">
-              <span>{{
-                trendData[key]?.length
-                  ? clock(trendData[key][0][0])
-                  : "等待采样"
-              }}</span
-              ><span>时间</span
-              ><span>{{
-                trendData[key]?.length ? clock(trendData[key].at(-1)[0]) : ""
-              }}</span>
+            <div class="chart-axis" aria-label="时间轴">
+              <span v-if="!chartTicks(key).length">等待采样</span>
+              <span
+                v-for="tick in chartTicks(key)"
+                :key="tick.index"
+                class="chart-tick"
+                :class="{ 'mobile-tick': tick.index % 3 === 0 }"
+                :title="tick.full"
+                ><span v-if="tick.date" class="tick-date">{{ tick.date }}</span
+                >{{ tick.label }}</span
+              >
             </div>
           </div>
         </section>
@@ -2493,7 +2645,7 @@ onUnmounted(() => {
                   type="checkbox"
                   :value="f"
                   v-model="draft.functions"
-                />{{ f }}</label
+                />{{ f }} · {{ functionDescriptions[f] }}</label
               >
             </fieldset>
             <label
@@ -2509,6 +2661,11 @@ onUnmounted(() => {
                 v-model="draft.read_identity"
               />启用设备身份读取（43 / 14）</label
             >
+            <p class="identity-help">
+              43 是功能码，14 是 MEI
+              类型，表示“读取设备标识”。启用后，客户端可读取下方配置的厂商、产品和版本（对象
+              0、1、2），用于识别设备；支持基本读取与单对象读取。不读写点位，不需要新端口；关闭也不影响寄存器读写。
+            </p>
             <div class="form-grid">
               <label
                 >厂商<input
