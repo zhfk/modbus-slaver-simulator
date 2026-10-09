@@ -1,13 +1,13 @@
 {
-  "version": "0.2.0rc6",
-  "release_url": "https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc6",
-  "source_commit": "b7d730da7d1c64db7cb7b970cce1cfb321cdb87c",
+  "version": "0.2.0rc7",
+  "release_url": "https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc7",
+  "source_commit": "7b44e7dba2300c75abb45f8fe3c84a4c3cb36473",
   "download_integrity_passed": true,
   "assets": [
     {
-      "name": "modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz",
-      "bytes": 31425899,
-      "sha256": "6b07d6b3f2b2943b13b998c3168d8651443c58b83410972cf6fe15f0636c0e7a",
+      "name": "modbus-simulator-0.2.0rc7-linux-x86_64.tar.gz",
+      "bytes": 31431768,
+      "sha256": "ae7ccb2761fe3e988d8e09c95660b14408893a39f4f95887b99dcc01c0ce2077",
       "platform": "linux",
       "architecture": "x86_64",
       "python": "3.12.15",
@@ -18,9 +18,9 @@
       ]
     },
     {
-      "name": "modbus-simulator-0.2.0rc6-windows-x86_64.zip",
-      "bytes": 17996005,
-      "sha256": "5d685fca2a29ab7f00fc9727a3a536c3539803b590276561ed974d6b56a21e6f",
+      "name": "modbus-simulator-0.2.0rc7-windows-x86_64.zip",
+      "bytes": 18003007,
+      "sha256": "a0935a57f41e8cf58b327d1390d80f2f881ad69dd3298a7623168e73c8c77fe6",
       "platform": "windows",
       "architecture": "x86_64",
       "python": "3.12.10",
@@ -31,9 +31,9 @@
       ]
     },
     {
-      "name": "modbus-simulator-0.2.0rc6-macos-arm64.tar.gz",
-      "bytes": 16540864,
-      "sha256": "275d6c64853f50f559f9c96dfaca28d9653a58404ab79d57baa45d1ca80f6f9e",
+      "name": "modbus-simulator-0.2.0rc7-macos-arm64.tar.gz",
+      "bytes": 16545795,
+      "sha256": "5e68052afe073a0785bade96523e0053a50287bfb9d2da77a1b04eb828857672",
       "platform": "macos",
       "architecture": "arm64",
       "python": "3.12.10",
@@ -46,8 +46,8 @@
   ],
   "downloaded_linux_check": {
     "passed": true,
-    "version": "0.2.0rc6",
-    "checked_at_utc": "2026-10-09T08:56:01.599824+00:00",
+    "version": "0.2.0rc7",
+    "checked_at_utc": "2026-10-09T10:13:56.924338+00:00",
     "checks": [
       "bundled page/assets/fonts, deep links and actual data directory without system Python/PATH",
       "three devices share one endpoint with isolated Unit IDs, values and stop",
@@ -57,21 +57,21 @@
       "offline compact and backup restore with bundled SQLite"
     ]
   },
-  "checked_at_utc": "2026-10-09T08:57:11.073507+00:00",
-  "workflow_url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514",
+  "checked_at_utc": "2026-10-09T10:15:25.514127+00:00",
+  "workflow_url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37915990824",
   "native_jobs": [
     {
-      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514/job/113744918194",
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37915990824/job/113772170811",
       "status": "completed successfully",
       "name": "build (macos-15, macos, arm64)"
     },
     {
-      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514/job/113744918205",
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37915990824/job/113772171025",
       "status": "completed successfully",
       "name": "build (ubuntu-22.04, linux, x86_64)"
     },
     {
-      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37907655514/job/113744917963",
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37915990824/job/113772171186",
       "status": "completed successfully",
       "name": "build (windows-2022, windows, x86_64)"
     }
@@ -82,6 +82,15 @@
       "actual read-only storage directory at 1440/1024/390 widths",
       "right drawer preserves workspace width and scroll, locks background and restores focus",
       "device creation",
+      "row menu overlays without changing row height at 1440/1024/390, stays in viewport, dismisses and restores focus",
+      "control input can select and save a generated strategy, then runs it",
+      "returning to control input clears strategy and extra parameters",
+      "sequence and replay switches initialize valid samples",
+      "Bool strategy choices and on/off fixed values, invalid sample retention, actual 0/1 sequence updates",
+      "single-point trend popover at 1440/1024/390 preserves list height and ignores bulk selection",
+      "template and empty creation reject duplicate endpoint/unit and retain drafts",
+      "distinct unit shares endpoint; editing rejects duplicates and excludes itself",
+      "wildcard/specific address overlap rejected in both creation modes and editing",
       "start/stop",
       "assignment preview",
       "assignment confirmation",
@@ -104,14 +113,14 @@
   },
   "short_load": {
     "status": "passed",
-    "completed_seconds": 140.646,
+    "completed_seconds": 140.633,
     "requests": 8316,
     "ui_frames": 140,
     "ui_reconnections": 5,
     "device_restarts": 1,
-    "source_sha256": "3ae25da394b8ea9ac12f5e1077e29bf7b763310be9f8de39fcab0d045d1ccd28",
-    "p99_ms": 16.886936005903408,
-    "version": "0.2.0rc6"
+    "source_sha256": "15fe991a88e50a72cf85056a508b8c6fd8d22be8d18dcb6e1e999b357ab32c9a",
+    "p99_ms": 29.103649998432957,
+    "version": "0.2.0rc7"
   },
   "pending_acceptance": [
     "24-hour and 72-hour endurance gates",

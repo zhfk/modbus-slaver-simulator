@@ -27,7 +27,9 @@
 
 - 包含监听端点冲突、控制输入策略编辑、Bool 策略选项、浮动点位菜单及单点位实时趋势气泡的修复，源码回归见下述记录。
 - 发布前本地后端 **156 项通过**，48.48 秒，TypeScript／Vite、Python 格式及未使用引用检查通过。0.2.0rc7 wheel 在仓库外安装后，页面／离线字体、健康 API、真实 Modbus 写入／读取和 API 值一致性检查通过。
-- 三个平台原生 CI、发布文件下载校验及下载 Linux 包的 29 项浏览器检查将在实际完成后记录；此处准备阶段不计为通过。
+- `v0.2.0rc7` 已发布，标签源码提交为 `7b44e7dba2300c75abb45f8fe3c84a4c3cb36473`；[GitHub Actions](https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37915990824) 的 Linux x86_64（Ubuntu 22.04）、Windows x64（Server 2022）、macOS Apple Silicon（macOS 15）全部通过原生后端回归、前端构建及仓库外解压包检查，不构建 Intel macOS。
+- 已从 [GitHub 发布页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc7) 实际下载三个包，逐个核对 SHA256、版本、OS／架构、源码提交及干净构建标记。下载的官方 Linux 包完成全部 6 组独立运行检查和 **29 项浏览器检查**，包括本次监听校验、策略调整、Bool 0／1、菜单和单点位趋势气泡；无页面脚本错误。机器可读证据：[standalone-validation.json](standalone-validation.json)，运行截图及产物：`artifacts/github-release-0.2.0rc7/`。
+- 0.2.0rc7 短时混合负载 **140.633 秒、8316 次请求**、140 份实时快照、5 次订阅重连及 1 次设备停止／重启通过，P99 29.104ms，无失败及队列丢弃。报告：`artifacts/soak-release-rc7/stage-1/report.json`；源码指纹 `15fe991a88e50a72cf85056a508b8c6fd8d22be8d18dcb6e1e999b357ab32c9a`。仅作为功能预发布，24／72 小时、用户目标系统常驻及实际 LAN 仍待验收。
 
 ## 点位策略、操作菜单与实时趋势（当前 main）
 
@@ -37,7 +39,7 @@
 - 实时趋势从当前值或对应行操作打开单点位气泡，移除列表下方趋势和批量入口。即使全选点位，气泡仅有当前点位的一个图表，趋势请求只带一个 ID；关闭后停止相应刷新并丢弃过期回复。
 - 完整后端 **156 项通过**，49.61 秒；TypeScript／Vite、Python 格式与未使用引用检查通过。Chromium **29 项通过**，无页面脚本错误，包含控制输入策略保存及实际运行、Bool 样本错误保留、0／1 变化、菜单行高与焦点、单点位趋势及原有流程。1440／1024／390px 下菜单和趋势气泡均在屏幕内，列表高度不变；报告及实际截图：`artifacts/point-interactions-browser-final/`。
 - 最终源码短时混合负载 **140.651 秒、8316 次请求**、140 份实时快照、5 次订阅重连及 1 次设备停止／重启通过，P99 20.406ms，无失败及队列丢弃；报告：`artifacts/soak-point-interactions-final/stage-1/report.json`，源码指纹 `3aeb01a6bbbce1043a62eed365708d7c43a4046f9051a2bc8d3c1f49f2d18b7a`。本次不替代尚未通过的 24／72 小时耐久验收。
-- 本次为源码修复，已发布 `v0.2.0rc6` 未改变；没有新原生包发布、目标桌面系统或 LAN 验收证据。
+- 上述源码修复已包含在 `v0.2.0rc7` 三个平台的原生包中，实际下载检查见本文件发布记录；旧 `v0.2.0rc6` 文件保持不变，目标桌面常驻和 LAN 仍待验收。
 
 ## 通配监听地址冲突修复（当前 main）
 
@@ -47,7 +49,7 @@
 - 完整后端 **156 项通过**，47.68 秒；包含 44 个新增回归，覆盖 IPv4／IPv6、两种地址添加顺序、相同／不同 Unit ID、两种新建方式、编辑、合法共享／独立端点及升级后修正。TypeScript／Vite、Python 格式与未使用引用检查通过。
 - Chromium **23 项通过**，无页面脚本错误；实际点击两种新建方式及编辑，验证重复 Unit ID 和通配地址冲突均被拒绝、草稿保留、配置不变，以及同端点不同 Unit ID 可创建。报告：`artifacts/endpoint-overlap-browser/browser.json`；原有抽屉、1440／1024／390px、键盘及离线字体检查仍通过。
 - 最终源码短时混合负载 **140.603 秒、8316 次请求**、140 份实时快照、5 次订阅重连、1 次设备停止／重启通过，P99 18.773ms，无失败及队列丢弃。报告：`artifacts/soak-endpoint-overlap-compatible/stage-1/report.json`；源码指纹 `0f6b9791ca3db2e882c57662c87e3f7f9100d4ff561c587dcd0471da8f9b1983`。此前两次因后续修复而中断的短时报告保留，不计入通过；本次仍不能替代 24／72 小时耐久验收。
-- 本项为 `main` 源码修复，已发布的 `v0.2.0rc6` 文件未改变，不能将本次检查计为新独立包已发布。
+- 本项修复已包含在 `v0.2.0rc7` 独立包，实际下载及原生 CI 证据见本文件发布记录；旧 `v0.2.0rc6` 文件未改变。
 
 ## 本轮目录展示与抽屉调整（0.2.0rc6）
 
