@@ -1,0 +1,121 @@
+name: Build standalone releases
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            arch: x86_64
+          - os: windows-2022
+            platform: windows
+            arch: x86_64
+          - os: macos-15-intel
+            platform: macos
+            arch: x86_64
+          - os: macos-15
+            platform: macos
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Confirm native architecture and version
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          python - <<'PY'
+          import os, platform, tomllib
+          from pathlib import Path
+          actual = {'AMD64': 'x86_64', 'x86_64': 'x86_64', 'arm64': 'arm64', 'aarch64': 'arm64'}[platform.machine()]
+          assert actual == os.environ['EXPECTED_ARCH'], (actual, os.environ['EXPECTED_ARCH'])
+          version = tomllib.loads(Path('pyproject.toml').read_text())['project']['version']
+          if os.environ['GITHUB_REF_TYPE'] == 'tag':
+              assert os.environ['GITHUB_REF_NAME'] == 'v' + version
+          PY
+      - name: Backend regression tests
+        run: |
+          python -m pip install -r requirements.lock.txt
+          python -m pytest -q
+      - name: Compile frontend
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run build
+      - name: Create minimal build environment
+        shell: bash
+        run: |
+          python -m venv .release-venv
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            .release-venv/Scripts/python.exe -m pip install -r requirements-release.txt
+            .release-venv/Scripts/python.exe scripts/build_release.py
+          else
+            .release-venv/bin/python -m pip install -r requirements-release.txt
+            .release-venv/bin/python scripts/build_release.py
+          fi
+      - name: Validate unpacked release outside checkout
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import shutil, subprocess, sys, tempfile
+          package = next(p for p in Path('dist/release').iterdir() if p.is_dir())
+          archive = next(Path('dist/release').glob('*.zip' if sys.platform == 'win32' else '*.tar.gz'))
+          with tempfile.TemporaryDirectory() as directory:
+              target = Path(directory) / package.name
+              if sys.platform == 'win32':
+                  shutil.unpack_archive(archive, directory)
+              else:
+                  shutil.unpack_archive(archive, directory, filter='data')
+              binary = target / ('modbus-simulator.exe' if sys.platform == 'win32' else 'modbus-simulator')
+              subprocess.run([sys.executable, 'scripts/release_check.py', '--binary', str(binary), '--output', 'dist/release/check.json'], check=True)
+          PY
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            dist/release/*.tar.gz
+            dist/release/*.zip
+            dist/release/*.sha256
+            dist/release/check.json
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+      - name: Publish candidate after all native checks pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          cat release-assets/*/*.sha256 > release-assets/SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" --verify-tag --prerelease --title "$RELEASE_TAG — standalone packages" --notes-file docs/release-notes.md release-assets/*/*.tar.gz release-assets/*/*.zip release-assets/SHA256SUMS.txt

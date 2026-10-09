@@ -10,11 +10,22 @@ import time
 import urllib.error
 import urllib.request
 
+from .paths import default_data_dir
+
+
+def application_command(port, data_dir):
+    prefix = (
+        [sys.executable, "serve"]
+        if getattr(sys, "frozen", False)
+        else [sys.executable, "-m", "simulator"]
+    )
+    return [*prefix, "--port", str(port), "--data-dir", str(data_dir)]
+
 
 def main():
     parser = argparse.ArgumentParser(description="监测业务健康并有限重启后端")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--data-dir", required=True)
+    parser.add_argument("--data-dir", default=str(default_data_dir()))
     parser.add_argument("--interval", type=float, default=5)
     parser.add_argument("--startup-grace", type=float, default=20)
     args = parser.parse_args()
@@ -28,22 +39,14 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, stop)
     restarts, child = deque(), None
     # This monitor must not use a proxy to reach its local child.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         while not stopped:
-            child = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "simulator",
-                    "--port",
-                    str(args.port),
-                    "--data-dir",
-                    args.data_dir,
-                ]
-            )
+            child = subprocess.Popen(application_command(args.port, args.data_dir))
             failures, last_progress = 0, None
             started = time.monotonic()
             while not stopped and child.poll() is None:

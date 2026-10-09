@@ -21,6 +21,7 @@ from .excel import HeavyTasks
 from .files import directory_bytes
 from .models import Configuration, thermal_template, uid
 from .modbus import ModbusService
+from .paths import default_data_dir
 from .runtime import Runtime
 from .storage import MiB, Storage
 
@@ -33,17 +34,6 @@ class TemporaryFileResponse(FileResponse):
             # BackgroundTask only runs after successful transmission. An
             # interrupted download or invalid Range also owns this cleanup.
             Path(self.path).unlink(missing_ok=True)
-
-
-def default_data_dir():
-    if os.name == "nt":
-        return (
-            Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "ModbusSimulator"
-        )
-    return (
-        Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
-        / "modbus-simulator"
-    )
 
 
 class BodyLimit:

@@ -2,6 +2,8 @@
 
 安装命令和功能清单见 [README](../README.md)，工程约束见 [AGENTS](../AGENTS.md)，实测结果见 [验收记录](acceptance.md)。本应用由一个后端同时提供页面、API、策略和 Modbus 服务；前端不另启服务。
 
+独立目录包用户无需安装 Python；下载、启动与三台从机配置见 [独立包说明](standalone.md)。包内 `service/` 提供 systemd、Windows 任务计划与 macOS launchd 模板；下文 Python 命令适用于源码／wheel 部署。
+
 ## 发布准备
 
 1. 构建机器安装 Python 3.12+、Node.js 22.12+，执行安装脚本。

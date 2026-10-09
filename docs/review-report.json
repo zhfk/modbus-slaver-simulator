@@ -101,13 +101,14 @@
   },
   "release_gates": {
     "24h_then_72h": {
-      "status": "running, not passed",
+      "status": "failed at 28665.328 seconds; 24h and 72h not passed",
       "started": "2026-10-09T00:27:11.254730+08:00",
       "path": "artifacts/soak-review/results",
       "required_seconds": [
         86400,
         259200
-      ]
+      ],
+      "failure": "loop delay 504.775ms exceeds 200ms"
     },
     "Windows_actual_host": "not executed",
     "cross_machine_LAN": "not executed"

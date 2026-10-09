@@ -4,4 +4,5 @@ prune frontend/node_modules
 prune frontend/dist
 graft scripts
 graft docs
+graft packaging
 prune scripts/__pycache__
