@@ -414,7 +414,9 @@ class Storage:
         dest = self.backups / "config.new.db"
 
         def make(conn):
-            with sqlite3.connect(dest) as backup:
+            # Connection context managers commit/rollback but do not close;
+            # Windows cannot rotate a backup while its handle remains open.
+            with contextlib.closing(sqlite3.connect(dest)) as backup:
                 conn.backup(backup, pages=128)
                 if backup.execute("PRAGMA quick_check").fetchone()[0] != "ok":
                     raise RuntimeError("备份校验失败")

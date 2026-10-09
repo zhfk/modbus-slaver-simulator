@@ -23,9 +23,9 @@
 | 目标 Windows 平台 | 跨平台 wheel、PowerShell 构建与监督脚本；已检查锁定依赖均有 Windows x64／Python 3.12 安装包 | 未在 Windows 实机执行 |
 | 另一台电脑通过实际 LAN 访问 | 支持实际网卡监听；当前用独立进程的 TCP 客户端验证 | 未在第二台电脑及目标防火墙环境执行 |
 
-## 独立包验证（0.2.0rc2）
+## 独立包验证（0.2.0rc3）
 
-- 本轮应用回归 **108 项通过**，42.74 秒；前端 TypeScript／Vite 构建通过。
+- 本轮应用回归 **109 项通过**，41.70 秒，包含备份轮换前释放 SQLite 连接的回归；前端 TypeScript／Vite 构建通过。
 - Linux 本机构建约 20MiB 压缩包，解压至仓库外，在清空 `PATH`／Python 路径环境后实际运行；三台从机 Unit ID 1／2／3 共用端点，读写及 API 值一致，停止一台后其他两台仍可读写；WebSocket、冻结 Excel 导入／导出、监督器和离线压缩／恢复检查通过。
 - 本机 Linux 包使用 glibc 2.41，只证明当前 Linux 平台；GitHub Linux 原生 runner 以 Ubuntu 22.04 构建。Windows x64、macOS Intel／Apple Silicon 的原生流水线须完成并验证后才算平台包通过，不能用 Linux 检查代替。
 - 此版本为功能预发布，耐久失败、目标用户系统和跨机器 LAN 验收仍未完成。

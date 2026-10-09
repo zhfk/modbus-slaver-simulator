@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import closing
 import math
 import os
 import socket
@@ -293,6 +294,40 @@ async def test_database_shutdown_drains_full_queue_and_rejects_new_jobs(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_backup_releases_sqlite_handle_before_rotating(tmp_path, monkeypatch):
+    storage = Storage(tmp_path)
+    await storage.open()
+    runtime = Runtime()
+    runtime.apply(storage.config)
+    connections = []
+    connect = sqlite3.connect
+    replace = os.replace
+
+    def capture_connection(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        if Path(args[0]).name == "config.new.db":
+            connections.append(connection)
+        return connection
+
+    def check_closed(source, destination):
+        if Path(source).name == "config.new.db":
+            assert connections
+            with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                connections[-1].execute("SELECT 1")
+        return replace(source, destination)
+
+    monkeypatch.setattr(sqlite3, "connect", capture_connection)
+    monkeypatch.setattr(os, "replace", check_closed)
+    try:
+        await storage.backup()
+        await storage.backup()
+        assert (storage.backups / "config.0.db").exists()
+        assert (storage.backups / "config.1.db").exists()
+    finally:
+        await storage.close(runtime)
+
+
+@pytest.mark.asyncio
 async def test_empty_backup_and_uri_characters_restore_successfully(tmp_path):
     directory = tmp_path / "data # 存储"
     storage = Storage(directory)
@@ -324,7 +359,7 @@ async def test_unknown_backup_version_is_rejected_before_touching_live_database(
     await storage.backup()
     backup = tmp_path / "backups/config.0.db"
     await storage.close(runtime)
-    with sqlite3.connect(backup) as conn:
+    with closing(sqlite3.connect(backup)) as conn, conn:
         conn.execute("PRAGMA user_version=99")
     live = tmp_path / "config.db"
     original = live.read_bytes()
@@ -552,7 +587,7 @@ def test_capture_limit_and_external_write_audit():
 
 
 def test_configuration_unknown_database_version_is_not_overwritten(tmp_path):
-    with sqlite3.connect(tmp_path / "config.db") as db:
+    with closing(sqlite3.connect(tmp_path / "config.db")) as db, db:
         db.execute("PRAGMA user_version=99")
 
     async def check():
@@ -564,7 +599,7 @@ def test_configuration_unknown_database_version_is_not_overwritten(tmp_path):
         await s.close(rt)
 
     asyncio.run(check())
-    with sqlite3.connect(tmp_path / "config.db") as db:
+    with closing(sqlite3.connect(tmp_path / "config.db")) as db, db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 99
 
 
@@ -643,7 +678,7 @@ async def test_backup_failure_does_not_report_verified_config_commit_as_failed(
     s.enqueue("event", {"time": time.time(), "kind": "test"})
     await s.flush()
     assert "backup disk unavailable" in s.nonessential_errors()
-    with sqlite3.connect(tmp_path / "config.db") as persisted:
+    with closing(sqlite3.connect(tmp_path / "config.db")) as persisted:
         assert persisted.execute("SELECT version FROM config").fetchone()[0] == 1
     await s.close(rt)
 
