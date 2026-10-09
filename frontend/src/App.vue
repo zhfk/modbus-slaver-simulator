@@ -8,6 +8,7 @@ import {
   ref,
   watch,
 } from "vue";
+import FeedbackBubbles, { type Feedback } from "./FeedbackBubbles.vue";
 type Row = Record<string, any>;
 const config = ref<Row>({ version: 0, devices: [], settings: {} });
 const devices = ref<Row[]>([]),
@@ -28,6 +29,7 @@ const selected = ref<string[]>([]),
   loaded = ref(false),
   stale = ref(false),
   lastGood = ref(0);
+const feedbackOrigin = ref<HTMLElement | null>(null);
 const health = ref<Row>({ storage: {}, endpoints: [] }),
   diagnostics = ref<Row[]>([]),
   onlyErrors = ref(false),
@@ -52,6 +54,7 @@ const importFile = ref<File | null>(null),
   importMode = ref("update"),
   importPreview = ref<Row | null>(null),
   importStep = ref(1);
+const showImportIssues = ref(true);
 const historyRows = ref<Row[]>([]),
   historyStart = ref(localTime(Date.now() - 3600000)),
   historyEnd = ref(localTime(Date.now())),
@@ -72,6 +75,99 @@ const menuStopped = computed(
   () =>
     menuDevice.value && ["stopped", "fault"].includes(menuDevice.value.status),
 );
+const storageError = computed(
+  () => health.value.storage.error || health.value.storage.history_error || "",
+);
+const feedbackItems = computed<Feedback[]>(() => {
+  const items: Feedback[] = [];
+  if (notice.value)
+    items.push({
+      id: "notice",
+      title: "操作提示",
+      message: notice.value,
+      kind: "status",
+    });
+  if (error.value)
+    items.push({
+      id: "error",
+      title: "操作失败",
+      message: error.value,
+      kind: "alert",
+    });
+  if (modal.value && draftError.value)
+    items.push({
+      id: "validation",
+      title: "校验提示",
+      message: draftError.value,
+      kind: "alert",
+    });
+  const preview = importPreview.value;
+  if (
+    modal.value === "import" &&
+    importStep.value === 2 &&
+    preview &&
+    showImportIssues.value
+  ) {
+    if (preview.errors.length)
+      items.push({
+        id: "import",
+        title: "导入校验",
+        kind: "alert",
+        message:
+          `发现 ${preview.errors.length} 个错误，配置尚未应用\n` +
+          preview.errors
+            .slice(0, 100)
+            .map(
+              (e: Row) =>
+                `${e.sheet} · 第 ${e.row} 行 · ${e.field}：${e.message}`,
+            )
+            .join("\n") +
+          (preview.errors.length > 100 ? "\n其余错误请下载完整清单查看。" : ""),
+      });
+    else
+      items.push({
+        id: "import",
+        title: "导入校验",
+        kind: preview.needs_stop.length ? "alert" : "status",
+        message:
+          `校验通过：新增 ${preview.added}，更新 ${preview.changed}，删除 ${preview.deleted}，配置版本 ${preview.version}。` +
+          (preview.needs_stop.length
+            ? "\n" +
+              preview.needs_stop.join("\n") +
+              "。关闭面板停止设备后，再次校验文件。"
+            : "\n配置尚未应用，确认差异后点击应用配置。"),
+      });
+  }
+  if (modal.value === "assign" && valuePreview.value)
+    items.push({
+      id: "preview",
+      title: "赋值校验",
+      kind: "status",
+      message:
+        valuePreview.value.items
+          .map(
+            (p: Row, i: number) =>
+              `${assigned.value[i]?.name}：实际值 ${p.value}，原始寄存器 ${p.raw.join(", ")}`,
+          )
+          .join("\n") + "\n当前值尚未修改，点击应用当前值后生效。",
+    });
+  return items;
+});
+function dismissFeedback(id: string) {
+  if (id === "notice") notice.value = "";
+  else if (id === "error") error.value = "";
+  else if (id === "validation") draftError.value = "";
+  else if (id === "import") showImportIssues.value = false;
+  else if (id === "preview") valuePreview.value = null;
+}
+async function refreshFeedback(id: string) {
+  await action(async () => {
+    await refreshConfig();
+    if (id === "validation")
+      draftError.value = "已获取配置版本，请比较修改后再次保存；原草稿已保留。";
+    else await poll();
+  });
+}
 let trendAnchor: HTMLElement | null = null;
 let scrollLock: { overflow: string; paddingRight: string } | null = null;
 function lockBackground(locked: boolean) {
@@ -302,8 +398,13 @@ async function request(path: string, options: RequestInit = {}) {
 }
 async function action(work: () => Promise<void>) {
   if (busy.value) return;
+  const focused = document.activeElement;
+  // A busy submit button loses browser focus when disabled; remember it first.
+  if (focused instanceof HTMLElement && !focused.closest(".feedback-popover"))
+    feedbackOrigin.value = focused;
   busy.value = true;
   error.value = "";
+  notice.value = "";
   draftError.value = "";
   try {
     await work();
@@ -434,6 +535,7 @@ async function selectDevice(key: string) {
 }
 watch(deviceId, async (key, previous) => {
   closeTrend();
+  closeRuntimeStatus();
   if (deviceMemory.size >= 16)
     deviceMemory.delete(deviceMemory.keys().next().value!);
   if (previous)
@@ -481,7 +583,10 @@ watch(page, () => {
   loadPoints().catch((e) => (error.value = e.message));
 });
 watch(onlyErrors, () => poll());
-watch(tab, () => closeTrend());
+watch(tab, () => {
+  closeTrend();
+  closeRuntimeStatus();
+});
 function toggleAll() {
   selected.value = allSelected.value ? [] : visibleIds.value.slice();
 }
@@ -501,6 +606,7 @@ function closeDeviceMenu(returnFocus = false) {
 }
 async function openDeviceMenu(event: MouseEvent | KeyboardEvent, key: string) {
   event.preventDefault();
+  closeRuntimeStatus();
   closeDeviceMenu();
   closeTrend();
   closeRowMenus();
@@ -579,6 +685,7 @@ function closeRowMenus(returnFocus = false) {
 }
 function positionRowMenu(event: Event, id: string) {
   if ((event as ToggleEvent).newState !== "open") return;
+  closeRuntimeStatus();
   closeDeviceMenu();
   const menu = event.target as HTMLElement;
   const trigger = document.getElementById(`point-more-${id}`);
@@ -596,22 +703,41 @@ function placePopover(menu: HTMLElement, trigger: HTMLElement) {
   menu.style.left = `${Math.max(8, Math.min(anchor.right - popup.width, innerWidth - popup.width - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(top, innerHeight - popup.height - 8))}px`;
 }
+function closeRuntimeStatus() {
+  const popup = document.getElementById("device-status-popover");
+  if (popup?.matches(":popover-open")) popup.hidePopover();
+}
+function runtimeStatusToggled(event: Event) {
+  if ((event as ToggleEvent).newState !== "open") return;
+  closeDeviceMenu();
+  closeRowMenus();
+  closeTrend();
+  const popup = event.target as HTMLElement;
+  const trigger = document.getElementById("device-status-trigger");
+  if (trigger) placePopover(popup, trigger);
+  popup.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+}
 function dismissRowMenus(event: Event) {
   if (
     event.target instanceof Element &&
-    event.target.closest(".point-menu, .trend-popover, .device-context-menu")
+    event.target.closest(
+      ".point-menu, .trend-popover, .device-context-menu, .runtime-status-popover, .feedback-popover",
+    )
   )
     return;
   closeRowMenus();
   closeTrend();
   closeDeviceMenu();
+  closeRuntimeStatus();
 }
 async function openModal(kind: string) {
   if (!(await closeModal())) return false;
   closeTrend();
+  closeRuntimeStatus();
   closeDeviceMenu(true);
   closeRowMenus(true);
   focusReturn = document.activeElement as HTMLElement;
+  notice.value = "";
   modal.value = kind;
   draftError.value = "";
   await nextTick();
@@ -1097,6 +1223,7 @@ async function previewImport() {
       `/api/import/preview?mode=${importMode.value}&target=${deviceId.value}`,
       { method: "POST", body: form },
     );
+    showImportIssues.value = true;
     importStep.value = 2;
   });
 }
@@ -1155,6 +1282,7 @@ async function exportData(kind: string) {
   });
 }
 async function viewTrend(point: Row) {
+  closeRuntimeStatus();
   closeDeviceMenu();
   trendKeys.value = [point.id];
   trendData.value = {};
@@ -1365,25 +1493,21 @@ onUnmounted(() => {
             <span>Unit {{ device.unit_id }}</span>
           </button>
         </div>
-      </header>
-      <div v-if="error" class="message error" role="alert">
-        <strong>操作未完成</strong>
-        <pre>{{ error }}</pre>
         <button
-          @click="
-            action(async () => {
-              await refreshConfig();
-              await poll();
-            })
-          "
+          v-if="device"
+          id="device-status-trigger"
+          class="status-trigger"
+          popovertarget="device-status-popover"
+          aria-label="查看设备运行状态"
+          :title="`${statusNames[device.status]}${stale ? '；数据已过期' : ''}${device.error || storageError ? '；存在异常，请查看详情' : ''}`"
         >
-          重新获取状态</button
-        ><button @click="error = ''">关闭提示</button>
-      </div>
-      <div v-if="notice" class="message" role="status">
-        {{ notice
-        }}<button aria-label="关闭提示" @click="notice = ''">关闭</button>
-      </div>
+          运行状态<span
+            class="status-warning"
+            :class="{ visible: stale || device.error || storageError }"
+            >异常</span
+          >
+        </button>
+      </header>
       <section v-if="!devices.length" class="empty panel">
         <span class="eyebrow">开始配置</span>
         <h2>{{ loaded ? "还没有设备" : "正在连接后端" }}</h2>
@@ -1398,40 +1522,6 @@ onUnmounted(() => {
         </div>
       </section>
       <template v-if="device">
-        <section class="status-strip" aria-label="运行状态">
-          <div>
-            <span>通信</span><strong>{{ statusNames[device.status] }}</strong>
-          </div>
-          <div>
-            <span>策略</span
-            ><strong>{{
-              device.status !== "running"
-                ? "未运行"
-                : device.paused
-                  ? "已暂停"
-                  : "运行中"
-            }}</strong>
-          </div>
-          <div>
-            <span>端点连接</span><strong>{{ device.connections }}</strong>
-          </div>
-          <div>
-            <span>最近请求</span
-            ><strong>{{ clock(device.last_request) }}</strong>
-          </div>
-          <div>
-            <span>点位</span><strong>{{ device.points }}</strong>
-          </div>
-          <div class="freshness">
-            <strong>{{ stale ? "数据已过期" : "实时状态" }}</strong
-            ><span>{{
-              lastGood
-                ? "更新于 " + new Date(lastGood).toLocaleTimeString("zh-CN")
-                : "等待数据"
-            }}</span>
-          </div>
-        </section>
-        <div v-if="device.error" class="message error">{{ device.error }}</div>
         <nav class="tabs" aria-label="设备功能">
           <button
             :class="{ active: tab === 'monitor' }"
@@ -1762,12 +1852,6 @@ onUnmounted(() => {
               }}
             </button>
           </div>
-          <div
-            v-if="health.storage.error || health.storage.history_error"
-            class="message error"
-          >
-            {{ health.storage.error || health.storage.history_error }}
-          </div>
           <div class="table-scroll">
             <table>
               <thead>
@@ -1833,6 +1917,71 @@ onUnmounted(() => {
         </section>
       </template>
     </main>
+    <section
+      v-if="device"
+      id="device-status-popover"
+      class="runtime-status-popover"
+      popover="auto"
+      role="region"
+      aria-label="运行状态"
+      @toggle="runtimeStatusToggled"
+    >
+      <header>
+        <strong>{{ device.name }} · 运行状态</strong
+        ><button
+          popovertarget="device-status-popover"
+          popovertargetaction="hide"
+          aria-label="关闭运行状态"
+        >
+          关闭
+        </button>
+      </header>
+      <div class="status-details">
+        <div>
+          <span>通信</span><strong>{{ statusNames[device.status] }}</strong>
+        </div>
+        <div>
+          <span>策略</span
+          ><strong>{{
+            device.status !== "running"
+              ? "未运行"
+              : device.paused
+                ? "已暂停"
+                : "运行中"
+          }}</strong>
+        </div>
+        <div>
+          <span>端点连接</span><strong>{{ device.connections }}</strong>
+        </div>
+        <div>
+          <span>最近请求</span><strong>{{ clock(device.last_request) }}</strong>
+        </div>
+        <div>
+          <span>点位</span><strong>{{ device.points }}</strong>
+        </div>
+        <div class="freshness">
+          <strong>{{ stale ? "数据已过期" : "实时状态" }}</strong
+          ><span>{{
+            lastGood
+              ? "更新于 " + new Date(lastGood).toLocaleTimeString("zh-CN")
+              : "等待数据"
+          }}</span>
+        </div>
+      </div>
+      <pre v-if="device.error" class="status-error">{{ device.error }}</pre>
+      <pre v-if="storageError" class="status-error">
+存储异常：{{ storageError }}</pre
+      >
+      <button
+        @click="
+          closeRuntimeStatus();
+          tab = 'diagnostics';
+          poll();
+        "
+      >
+        查看通信诊断
+      </button>
+    </section>
     <!-- Manual dismissal prevents the opening right-button release from closing the menu. -->
     <div
       id="device-context-menu"
@@ -1918,21 +2067,6 @@ onUnmounted(() => {
           <button aria-label="关闭抽屉" @click="closeModal">关闭</button>
         </header>
         <div class="drawer-content">
-          <div v-if="draftError" class="message error" role="alert">
-            <pre>{{ draftError }}</pre>
-            <button
-              type="button"
-              @click="
-                action(async () => {
-                  await refreshConfig();
-                  draftError =
-                    '已获取配置版本，请比较修改后再次保存；原草稿已保留。';
-                })
-              "
-            >
-              刷新配置版本并保留草稿
-            </button>
-          </div>
           <form v-if="modal === 'new'" @submit.prevent="createDevice">
             <label
               >设备名称<input
@@ -2452,12 +2586,6 @@ onUnmounted(() => {
             <button type="button" @click="previewAssign" :disabled="busy">
               校验并预览编码值
             </button>
-            <ul v-if="valuePreview">
-              <li v-for="(p, i) in valuePreview.items" :key="i">
-                {{ assigned[i]?.name }}：实际值 {{ p.value }}，原始寄存器
-                {{ p.raw.join(", ") }}
-              </li>
-            </ul>
             <div class="form-actions">
               <button class="primary" :disabled="busy">应用当前值</button
               ><button type="button" @click="closeModal">取消</button>
@@ -2497,39 +2625,16 @@ onUnmounted(() => {
                 解析并校验
               </button></template
             ><template v-if="importStep === 2 && importPreview"
-              ><div v-if="importPreview.errors.length" class="message error">
-                <strong
-                  >发现
-                  {{ importPreview.errors.length }} 个错误，配置尚未应用</strong
-                >
-                <ul>
-                  <li v-for="(e, i) in importPreview.errors" :key="i">
-                    {{ e.sheet }} · 第 {{ e.row }} 行 · {{ e.field }}：{{
-                      e.message
-                    }}
-                  </li>
-                </ul>
-                <button @click="errorDownload">下载错误清单</button>
-              </div>
-              <template v-else
-                ><div class="preview-counts">
-                  <span>新增 {{ importPreview.added }}</span
-                  ><span>更新 {{ importPreview.changed }}</span
-                  ><span>删除 {{ importPreview.deleted }}</span
-                  ><span>配置版本 {{ importPreview.version }}</span>
-                </div>
-                <div
-                  v-if="importPreview.needs_stop.length"
-                  class="message error"
-                >
-                  {{
-                    importPreview.needs_stop.join("\n")
-                  }}。关闭面板停止设备后，再次校验文件。
-                </div>
-                <p>
-                  应用时会重新检查设备状态、引用关系和配置版本，不会自动停机或启动设备。
-                </p></template
-              >
+              ><button @click="showImportIssues = true">
+                查看校验结果{{
+                  importPreview.errors.length
+                    ? `（${importPreview.errors.length} 个错误）`
+                    : ""
+                }}
+              </button>
+              <p>
+                应用时会重新检查设备状态、引用关系和配置版本，不会自动停机或启动设备。
+              </p>
               <div class="form-actions">
                 <button
                   class="primary"
@@ -2687,5 +2792,31 @@ onUnmounted(() => {
         </div>
       </section>
     </div>
+    <FeedbackBubbles
+      :items="feedbackItems"
+      :context="modal"
+      :origin="feedbackOrigin"
+      @dismiss="dismissFeedback"
+    >
+      <template #actions="{ item }">
+        <button
+          v-if="item.id === 'error' || item.id === 'validation'"
+          type="button"
+          :disabled="busy"
+          @click="refreshFeedback(item.id)"
+        >
+          {{
+            item.id === "validation" ? "刷新配置版本并保留草稿" : "重新获取状态"
+          }}
+        </button>
+        <button
+          v-if="item.id === 'import' && importPreview?.errors.length"
+          type="button"
+          @click="errorDownload"
+        >
+          下载错误清单
+        </button>
+      </template>
+    </FeedbackBubbles>
   </div>
 </template>

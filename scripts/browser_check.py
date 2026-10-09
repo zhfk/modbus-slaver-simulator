@@ -5,6 +5,8 @@ import asyncio
 import json
 import os
 import shutil
+from io import BytesIO
+from openpyxl import load_workbook
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from playwright.async_api import async_playwright, expect
@@ -103,6 +105,54 @@ async def run(url, output):
         await expect(
             page.get_by_role("button", name="目标温度", exact=True)
         ).to_be_visible()
+        # Status and feedback live in the browser top layer, with no page reflow.
+        for width in (1440, 1024, 390):
+            await page.set_viewport_size({"width": width, "height": 844})
+            notice = page.get_by_role("status", name="操作提示", exact=True)
+            if await notice.is_visible():
+                await notice.get_by_role(
+                    "button", name="关闭操作提示", exact=True
+                ).click()
+            baseline = await page.locator("main").bounding_box()
+            height = await page.evaluate("document.documentElement.scrollHeight")
+            await page.locator(".page-header .endpoint").click()
+            await expect(notice).to_be_visible()
+            assert await page.locator("main").bounding_box() == baseline
+            assert (
+                await page.evaluate("document.documentElement.scrollHeight") == height
+            )
+            await page.get_by_role(
+                "button", name="查看设备运行状态", exact=True
+            ).click()
+            status = page.get_by_role("region", name="运行状态", exact=True)
+            await expect(status).to_be_visible()
+            await expect(status).to_contain_text("已停止")
+            await expect(status).to_contain_text("端点连接")
+            # The native toggle event positions the top-layer popup asynchronously.
+            await page.wait_for_timeout(100)
+            bounds = await status.bounding_box()
+            assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width, (
+                width,
+                bounds,
+            )
+            assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 844
+            assert await page.locator("main").bounding_box() == baseline
+            await page.screenshot(path=str(output / f"status-feedback-{width}.png"))
+            await page.keyboard.press("Escape")
+            await expect(status).to_be_hidden()
+            await expect(
+                page.get_by_role("button", name="查看设备运行状态", exact=True)
+            ).to_be_focused()
+            await page.get_by_role(
+                "button", name="查看设备运行状态", exact=True
+            ).click()
+            await page.get_by_role("heading", name="验收温控设备", exact=True).click()
+            await expect(status).to_be_hidden()
+        await notice.hover()
+        await page.wait_for_timeout(6500)
+        await expect(notice).to_be_visible()
+        await page.mouse.move(1, 1)
+        await expect(notice).to_be_hidden(timeout=8000)
         for width in (1440, 1024, 390):
             await page.set_viewport_size({"width": width, "height": 844})
             row = page.get_by_role("row").filter(
@@ -171,6 +221,21 @@ async def run(url, output):
         assert await page.evaluate("scrollY") == scroll
         assert not await page.locator("main").evaluate("main => main.inert")
         await page.set_viewport_size({"width": 1440, "height": 1000})
+        first_device = (await (await page.request.get(url + "/api/devices")).json())[0]
+        failed_start_url = url + f"/api/devices/{first_device['id']}/actions/start"
+
+        async def failed_start(route):
+            await route.fulfill(status=400, json={"message": "验证操作失败提示"})
+
+        await page.route(failed_start_url, failed_start)
+        baseline = await page.locator("main").bounding_box()
+        await device_action("验收温控设备", "启动设备")
+        failure = page.get_by_role("alert", name="操作失败", exact=True)
+        await expect(failure).to_contain_text("验证操作失败提示")
+        assert await page.locator("main").bounding_box() == baseline
+        await failure.get_by_role("button", name="重新获取状态", exact=True).click()
+        await expect(failure).to_be_hidden()
+        await page.unroute(failed_start_url, failed_start)
         await device_action("验收温控设备", "启动设备")
         await expect(
             page.locator(".device-link").filter(has_text="验收温控设备")
@@ -180,7 +245,18 @@ async def run(url, output):
         )
         await row.get_by_role("button", name="赋值", exact=True).click()
         await page.get_by_label("新工程值", exact=True).fill("75.3")
+        preview_height = await page.locator(".drawer-content").evaluate(
+            "el => el.scrollHeight"
+        )
         await page.get_by_role("button", name="校验并预览编码值", exact=True).click()
+        await expect(dialog := page.get_by_role("dialog")).to_be_visible()
+        await expect(
+            dialog.get_by_role("status", name="赋值校验", exact=True)
+        ).to_be_visible()
+        assert (
+            await page.locator(".drawer-content").evaluate("el => el.scrollHeight")
+            == preview_height
+        )
         await expect(page.get_by_text("实际值 75.3", exact=False)).to_be_visible()
         await page.get_by_role("button", name="应用当前值", exact=True).click()
         await expect(row.locator(".live-value")).to_contain_text("75.30")
@@ -188,7 +264,22 @@ async def run(url, output):
         await expect(
             page.locator(".device-link").filter(has_text="验收温控设备")
         ).to_contain_text("策略暂停")
+        await page.get_by_role("button", name="查看设备运行状态", exact=True).click()
+        await expect(
+            page.get_by_role("region", name="运行状态", exact=True)
+        ).to_contain_text("已暂停")
         await device_action("验收温控设备", "恢复策略")
+        await expect(
+            page.locator("#device-context-menu").get_by_role(
+                "menuitem", name="暂停策略", exact=True, include_hidden=True
+            )
+        ).to_be_enabled()
+        endpoint = page.locator(".page-header .endpoint")
+        await endpoint.click()
+        notice = page.get_by_role("status", name="操作提示", exact=True)
+        await expect(notice).to_contain_text("监听地址")
+        await notice.get_by_role("button", name="关闭操作提示", exact=True).click()
+        await expect(endpoint).to_be_focused()
         await page.get_by_role("button", name="目标温度", exact=True).click()
         await expect(page.get_by_role("heading", name="编辑点位")).to_be_visible()
         await page.get_by_label("名称", exact=True).fill("目标温度设定")
@@ -199,10 +290,37 @@ async def run(url, output):
         await page.get_by_role("button", name="目标温度设定", exact=True).click()
         dialog = page.get_by_role("dialog")
         await dialog.get_by_label("倍率", exact=True).fill("0")
+        form_height = await page.locator(".drawer-content").evaluate(
+            "el => el.scrollHeight"
+        )
         await dialog.get_by_role("button", name="保存配置", exact=True).click()
         await expect(dialog).to_be_visible()
         await expect(dialog.get_by_label("倍率", exact=True)).to_have_value("0")
-        await expect(dialog.locator(".message.error")).to_contain_text("倍率")
+        await expect(
+            dialog.get_by_role("alert", name="校验提示", exact=True)
+        ).to_contain_text("倍率")
+        assert (
+            await page.locator(".drawer-content").evaluate("el => el.scrollHeight")
+            == form_height
+        )
+        validation = dialog.get_by_role("alert", name="校验提示", exact=True)
+        for width in (1440, 1024, 390):
+            await page.set_viewport_size({"width": width, "height": 844})
+            await expect(validation).to_be_visible()
+            await expect(dialog.get_by_label("倍率", exact=True)).to_have_value("0")
+            bounds = await validation.bounding_box()
+            assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+            assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 844
+            await page.screenshot(path=str(output / f"validation-{width}.png"))
+        await validation.get_by_role("button", name="关闭校验提示", exact=True).click()
+        await expect(validation).to_be_hidden()
+        await expect(dialog.get_by_label("倍率", exact=True)).to_have_value("0")
+        await expect(
+            dialog.get_by_role("button", name="保存配置", exact=True)
+        ).to_be_focused()
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(validation).to_be_visible()
+        await page.set_viewport_size({"width": 1440, "height": 1000})
         # Errors retain edits; Escape returns keyboard focus to the table.
         await page.keyboard.press("Escape")
         await expect(dialog).to_have_count(0)
@@ -344,12 +462,12 @@ async def run(url, output):
             await dialog.get_by_label("Modbus 端口", exact=True).fill("15120")
             await dialog.get_by_label("Unit ID", exact=True).fill("1")
             await dialog.get_by_role("button", name="创建设备", exact=True).click()
-            await expect(dialog.locator(".message.error")).to_contain_text(
-                "同一端点 Unit ID 重复"
-            )
-            await expect(dialog.locator(".message.error")).to_contain_text(
-                "验收温控设备"
-            )
+            await expect(
+                dialog.get_by_role("alert", name="校验提示", exact=True)
+            ).to_contain_text("同一端点 Unit ID 重复")
+            await expect(
+                dialog.get_by_role("alert", name="校验提示", exact=True)
+            ).to_contain_text("验收温控设备")
             await expect(dialog.get_by_label("设备名称", exact=True)).to_have_value(
                 "重复设备"
             )
@@ -358,9 +476,9 @@ async def run(url, output):
             for unit in ("1", "2"):
                 await dialog.get_by_label("Unit ID", exact=True).fill(unit)
                 await dialog.get_by_role("button", name="创建设备", exact=True).click()
-                await expect(dialog.locator(".message.error")).to_contain_text(
-                    "监听地址冲突"
-                )
+                await expect(
+                    dialog.get_by_role("alert", name="校验提示", exact=True)
+                ).to_contain_text("监听地址冲突")
                 await expect(dialog.get_by_label("监听 IP", exact=True)).to_have_value(
                     "0.0.0.0"
                 )
@@ -382,15 +500,17 @@ async def run(url, output):
         await dialog.get_by_label("Unit ID", exact=True).fill("1")
         before = await (await page.request.get(url + "/api/config")).json()
         await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
-        await expect(dialog.locator(".message.error")).to_contain_text(
-            "同一端点 Unit ID 重复"
-        )
+        await expect(
+            dialog.get_by_role("alert", name="校验提示", exact=True)
+        ).to_contain_text("同一端点 Unit ID 重复")
         await expect(dialog.get_by_label("Unit ID", exact=True)).to_have_value("1")
         assert await (await page.request.get(url + "/api/config")).json() == before
         await dialog.get_by_label("Unit ID", exact=True).fill("2")
         await dialog.get_by_label("绑定 IP", exact=True).fill("0.0.0.0")
         await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
-        await expect(dialog.locator(".message.error")).to_contain_text("监听地址冲突")
+        await expect(
+            dialog.get_by_role("alert", name="校验提示", exact=True)
+        ).to_contain_text("监听地址冲突")
         assert await (await page.request.get(url + "/api/config")).json() == before
         await dialog.get_by_label("绑定 IP", exact=True).fill("127.0.0.1")
         await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
@@ -469,9 +589,9 @@ async def run(url, output):
         await samples.fill("[[0.3,0],[0.3,2]]")
         before = await (await page.request.get(url + "/api/config")).json()
         await dialog.get_by_role("button", name="保存配置", exact=True).click()
-        await expect(dialog.locator(".message.error")).to_contain_text(
-            "样本值只能为 0／1"
-        )
+        await expect(
+            dialog.get_by_role("alert", name="校验提示", exact=True)
+        ).to_contain_text("样本值只能为 0／1")
         assert await (await page.request.get(url + "/api/config")).json() == before
         await samples.fill("[[0.3,0],[0.3,1]]")
         await dialog.get_by_role("button", name="保存配置", exact=True).click()
@@ -632,7 +752,7 @@ async def run(url, output):
         await open_device_menu("菜单设备 2#")
         await page.set_viewport_size({"width": 1430, "height": 1000})
         await expect(menu).to_be_hidden()
-        await page.set_viewport_size({"width": 1430, "height": 500})
+        await page.set_viewport_size({"width": 1430, "height": 350})
         await open_device_menu("菜单设备 2#")
         scroll_before = await page.evaluate("scrollY")
         await page.evaluate("window.scrollBy(0, 30)")
@@ -655,6 +775,60 @@ async def run(url, output):
         assert (
             devices[0]["name"] == "验收温控设备" and devices[0]["status"] == "running"
         )
+        # A real workbook with invalid rows produces bounded, reopenable validation.
+        response = await page.request.get(url + "/api/export/config")
+        assert response.status == 200
+        workbook = load_workbook(BytesIO(await response.body()))
+        sheet = workbook["点位"]
+        columns = {cell.value: cell.column for cell in sheet[1]}
+        source_row = [cell.value for cell in sheet[2]]
+        for index in range(105):
+            row = list(source_row)
+            row[columns["点位 ID"] - 1] = f"invalid-import-{index}"
+            row[columns["倍率"] - 1] = 0
+            sheet.append(row)
+        buffer = BytesIO()
+        workbook.save(buffer)
+        workbook.close()
+        await page.get_by_role("button", name="点位监控", exact=True).click()
+        await page.get_by_role("button", name="导入", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        async with page.expect_download() as template_download:
+            await dialog.get_by_role("button", name="下载模板", exact=True).click()
+        assert (await template_download.value).suggested_filename.endswith(".xlsx")
+        notice = dialog.get_by_role("status", name="操作提示", exact=True)
+        await expect(notice).to_contain_text("导出完成")
+        await notice.get_by_role("button", name="关闭操作提示", exact=True).click()
+        await dialog.locator('input[type="file"]').set_input_files(
+            {
+                "name": "invalid.xlsx",
+                "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "buffer": buffer.getvalue(),
+            }
+        )
+        await dialog.get_by_role("button", name="解析并校验", exact=True).click()
+        issues = dialog.get_by_role("alert", name="导入校验", exact=True)
+        await expect(issues).to_be_visible(timeout=15000)
+        await expect(issues).to_contain_text("配置尚未应用")
+        await expect(issues).to_contain_text("下载完整清单")
+        await expect(
+            dialog.get_by_role("button", name="应用配置", exact=True)
+        ).to_be_disabled()
+        bounds = await issues.bounding_box()
+        assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 1000
+        await issues.get_by_role("button", name="关闭导入校验", exact=True).click()
+        await expect(issues).to_be_hidden()
+        await dialog.get_by_role("button", name="查看校验结果", exact=False).click()
+        await expect(issues).to_be_visible()
+        async with page.expect_download() as download_info:
+            await issues.get_by_role("button", name="下载错误清单", exact=True).click()
+        download = await download_info.value
+        await download.save_as(str(output / "import-errors.json"))
+        errors = json.loads((output / "import-errors.json").read_text())
+        assert len(errors) >= 105
+        await page.screenshot(path=str(output / "import-validation.png"))
+        await dialog.get_by_role("button", name="关闭抽屉", exact=True).click()
+        await expect(dialog).to_have_count(0)
         assert not failures, failures
         await browser.close()
     report = {
@@ -663,6 +837,11 @@ async def run(url, output):
             "actual read-only storage directory at 1440/1024/390 widths",
             "right drawer preserves workspace width and scroll, locks background and restores focus",
             "device creation",
+            "runtime status and operation feedback at 1440/1024/390 preserve workspace geometry, dismiss and restore focus",
+            "operation feedback pauses on hover then closes automatically",
+            "failed operation feedback overlays without reflow and retains refresh/retry controls",
+            "validation and encoded preview use floating feedback, keep drawer height and drafts, with close/focus return",
+            "real Excel validation is bounded, blocks application, reopens and downloads the full error list",
             "device context menu controls explicit card target without changing another selected device",
             "device context menu settings/edit/start/stop/reset/delete, state guards and cancelled deletion",
             "device menu at 1440/1024/390: trigger/Shift+F10, arrows/Home/End/Escape, unchanged layout, outside/scroll/resize dismissal",
