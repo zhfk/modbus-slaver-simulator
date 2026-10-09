@@ -10,17 +10,17 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 | [源码启动](#源码启动) | 修改代码、本地开发和自行构建 | Python 3.12、Node.js 22.12+、Git |
 | [wheel 部署](#wheel-部署需-python与升级) | 已有 Python 环境，自行分发安装包 | Python 3.12 和对应平台依赖 |
 
-当前版本为 `0.2.0rc6` 功能预发布。三个发布目标已通过原生检查和下载校验，长期运行验收尚未通过；详细证据见 [验收记录](docs/acceptance.md)。
+当前版本为 `0.2.0rc7` 功能预发布。原生构建和下载校验结果见 [验收记录](docs/acceptance.md)，长期运行验收尚未通过。
 
 ## Release 包启动（推荐）
 
-在 [v0.2.0rc6 下载页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc6) 的 **Assets** 中选择对应平台包。包内包含 Python、应用依赖、前端页面和离线字体；不要下载 `Source code` 代替独立运行包。完整解压并保留 `_internal/` 目录，不能只复制可执行文件。
+在 [v0.2.0rc7 下载页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc7) 的 **Assets** 中选择对应平台包。包内包含 Python、应用依赖、前端页面和离线字体；不要下载 `Source code` 代替独立运行包。完整解压并保留 `_internal/` 目录，不能只复制可执行文件。
 
 | 平台 | 下载文件 | 兼容与验证范围 |
 | --- | --- | --- |
-| Linux x86_64 | [modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc6/modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz) | Ubuntu 22.04 原生验证，glibc 2.35+；不支持 Alpine/musl |
-| Windows x64 | [modbus-simulator-0.2.0rc6-windows-x86_64.zip](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc6/modbus-simulator-0.2.0rc6-windows-x86_64.zip) | Windows Server 2022 原生验证，目标 Windows 10／11 尚须实机验收 |
-| macOS Apple Silicon | [modbus-simulator-0.2.0rc6-macos-arm64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc6/modbus-simulator-0.2.0rc6-macos-arm64.tar.gz) | macOS 15 原生验证，更老系统未验证；不提供 Intel 版本 |
+| Linux x86_64 | [modbus-simulator-0.2.0rc7-linux-x86_64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc7/modbus-simulator-0.2.0rc7-linux-x86_64.tar.gz) | Ubuntu 22.04 原生验证，glibc 2.35+；不支持 Alpine/musl |
+| Windows x64 | [modbus-simulator-0.2.0rc7-windows-x86_64.zip](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc7/modbus-simulator-0.2.0rc7-windows-x86_64.zip) | Windows Server 2022 原生验证，目标 Windows 10／11 尚须实机验收 |
+| macOS Apple Silicon | [modbus-simulator-0.2.0rc7-macos-arm64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc7/modbus-simulator-0.2.0rc7-macos-arm64.tar.gz) | macOS 15 原生验证，更老系统未验证；不提供 Intel 版本 |
 
 下载页的 `SHA256SUMS.txt` 可用于核对文件完整性。
 
@@ -29,8 +29,8 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 在下载文件所在目录执行：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz
-cd modbus-simulator-0.2.0rc6-linux-x86_64
+tar -xzf modbus-simulator-0.2.0rc7-linux-x86_64.tar.gz
+cd modbus-simulator-0.2.0rc7-linux-x86_64
 ./start.sh
 ```
 
@@ -39,8 +39,8 @@ cd modbus-simulator-0.2.0rc6-linux-x86_64
 解压 zip，进入包目录双击 `start.cmd`。也可在下载目录打开 PowerShell 执行：
 
 ```powershell
-Expand-Archive -Path .\modbus-simulator-0.2.0rc6-windows-x86_64.zip -DestinationPath .
-Set-Location .\modbus-simulator-0.2.0rc6-windows-x86_64
+Expand-Archive -Path .\modbus-simulator-0.2.0rc7-windows-x86_64.zip -DestinationPath .
+Set-Location .\modbus-simulator-0.2.0rc7-windows-x86_64
 .\start.cmd
 ```
 
@@ -49,8 +49,8 @@ Set-Location .\modbus-simulator-0.2.0rc6-windows-x86_64
 在下载文件所在目录执行：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc6-macos-arm64.tar.gz
-cd modbus-simulator-0.2.0rc6-macos-arm64
+tar -xzf modbus-simulator-0.2.0rc7-macos-arm64.tar.gz
+cd modbus-simulator-0.2.0rc7-macos-arm64
 ./start.command
 ```
 
@@ -136,7 +136,7 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 
 `0.0.0.0` 表示监听所有 IPv4 地址，因此不能再用 `127.0.0.1` 或某个网卡 IPv4 地址另建同端口端点，即使 Unit ID 不同也会冲突；IPv6 的 `::` 与具体 IPv6 地址同理。共享端口时应为所有设备填写相同监听 IP（例如都填 `0.0.0.0`），并使用不同 Unit ID。不同具体 IP 或不同端口仍允许重复 Unit ID。
 
-通配地址重叠校验已在当前 `main` 源码修复，已发布的 `v0.2.0rc6` 包尚未包含此修复。源码升级后，旧版保存的重叠配置仍可在页面中读取和修正；停止相关设备，把监听 IP 统一并调整 Unit ID，或改用不同端口，再保存。
+`0.2.0rc7` 包含通配地址重叠校验修复。升级后，旧版保存的重叠配置仍可在页面中读取和修正；停止相关设备，把监听 IP 统一并调整 Unit ID，或改用不同端口，再保存。
 
 不要使用 `--reload` 或多个 Web worker。内存中的寄存器是协议、管理界面与策略的唯一数据来源。“暂停策略”保留通信；“停止设备”停止该设备通信。
 
@@ -154,9 +154,9 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 
 通用表达式仅支持四则运算和 `t`、`x0…x31`，不执行用户 Python。回放样本为 `[时间秒, 工程值]` 列表，序列样本为 `[持续秒数, 工程值]`。在点位编辑中设置参数与依赖。
 
-当前 `main` 中，控制输入点位也可直接选择生成策略，写入后行为随之切换为“保持写入值”；切回控制输入会清除生成策略。Bool 点位的策略选项为无策略、固定值、状态序列、回放、表达式和回差报警；固定值选择关（0）／开（1），序列／回放样本值及表达式结果必须为 0／1。数值型点位保留完整策略列表。
+控制输入点位可直接选择生成策略，写入后行为随之切换为“保持写入值”；切回控制输入会清除生成策略。Bool 点位的策略选项为无策略、固定值、状态序列、回放、表达式和回差报警；固定值选择关（0）／开（1），序列／回放样本值及表达式结果必须为 0／1。数值型点位保留完整策略列表。
 
-点位“更多”是浮动菜单，展开不撑高表格行。点击某个点位的当前值，或该行“更多 → 查看趋势”，打开该点位的实时趋势气泡；每次仅显示一个点位，忽略批量选择，不在列表下方追加图表。气泡支持暂停图表、关闭按钮、Esc 和点击外侧。这些界面修复尚未包含在已发布的 `v0.2.0rc6` 包中。
+点位“更多”是浮动菜单，展开不撑高表格行。点击某个点位的当前值，或该行“更多 → 查看趋势”，打开该点位的实时趋势气泡；每次仅显示一个点位，忽略批量选择，不在列表下方追加图表。气泡支持暂停图表、关闭按钮、Esc 和点击外侧。这些界面修复包含在 `0.2.0rc7` 包中。
 
 附加参数编辑框只填写表单没有展示的参数。例如噪声的 `noise` 在上方表单填写，JSON 填写 `{"base":"fixed","value":25,"distribution":"normal"}`；删除 JSON 中的键会删除该附加参数。非法 JSON、重复的表单参数和保存失败都保留草稿，离开未保存的编辑会提示。历史采样关闭后仍可查询／导出已有数据；历史导出遵循窗口中选择的点位和时间范围。
 
@@ -225,13 +225,13 @@ npm --prefix frontend run build
 .venv/bin/python -m build --no-isolation
 ```
 
-Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc6-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
+Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc7-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
 
 Linux：在 wheel 与锁定文件所在目录运行：
 
 ```bash
 python3 -m venv "$HOME/modbus-simulator/venv"
-"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc6-py3-none-any.whl
+"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc7-py3-none-any.whl
 "$HOME/modbus-simulator/venv/bin/python" -m simulator.supervisor --data-dir "$HOME/.local/share/modbus-simulator" --port 8000
 ```
 
@@ -241,7 +241,7 @@ Windows PowerShell：在 wheel 与锁定文件所在目录运行：
 $AppDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulatorApp'
 $DataDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulator'
 py -3.12 -m venv "$AppDir\venv"
-& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc6-py3-none-any.whl
+& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc7-py3-none-any.whl
 & "$AppDir\venv\Scripts\python.exe" -m simulator.supervisor --data-dir $DataDir --port 8000
 ```
 
