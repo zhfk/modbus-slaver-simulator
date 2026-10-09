@@ -50,6 +50,24 @@ async def run(url, output):
         await page.route("**/*", offline_route)
         await page.goto(url)
         await expect(page.get_by_role("heading", name="还没有设备")).to_be_visible()
+        await page.get_by_role("button", name="存储与恢复设置", exact=True).click()
+        actual_health = await page.request.get(url + "/api/health")
+        directory = (await actual_health.json())["storage"]["data_dir"]
+        path_field = page.get_by_label("当前数据目录", exact=True)
+        await expect(path_field).to_have_value(directory)
+        assert await path_field.evaluate("field => field.readOnly")
+        for width in (1440, 1024, 390):
+            await page.set_viewport_size(
+                {"width": width, "height": 1000 if width > 500 else 844}
+            )
+            await expect(path_field).to_be_visible()
+            assert not await page.evaluate(
+                "document.documentElement.scrollWidth > innerWidth"
+            ), f"Storage dialog overflow at {width}"
+            await page.screenshot(path=str(output / f"storage-width-{width}.png"))
+        await page.set_viewport_size({"width": 1440, "height": 1000})
+        await page.keyboard.press("Escape")
+        await expect(page.get_by_role("dialog")).to_have_count(0)
         await page.locator(".empty .primary").click()
         await page.get_by_label("设备名称", exact=True).fill("验收温控设备")
         await page.get_by_label("Modbus 端口", exact=True).fill("15120")
@@ -60,6 +78,40 @@ async def run(url, output):
         await expect(
             page.get_by_role("button", name="目标温度", exact=True)
         ).to_be_visible()
+        # A drawer overlays the existing workspace without moving it or
+        # removing the scrollbar's width. Only its own content can scroll.
+        await page.set_viewport_size({"width": 1440, "height": 500})
+        await page.evaluate("window.scrollTo(0, 150)")
+        trigger = page.get_by_role("button", name="目标温度", exact=True)
+        await trigger.scroll_into_view_if_needed()
+        background = await page.locator("main").bounding_box()
+        scroll = await page.evaluate("scrollY")
+        assert scroll > 0
+        await trigger.click()
+        drawer = page.get_by_role("dialog")
+        await expect(drawer).to_be_visible()
+        bounds = await drawer.bounding_box()
+        assert bounds["x"] > 0 and abs(bounds["x"] + bounds["width"] - 1440) <= 1
+        assert await page.locator("main").bounding_box() == background
+        assert await page.evaluate("scrollY") == scroll
+        assert await page.locator("main").evaluate("main => main.inert")
+        await page.mouse.move(300, 250)
+        await page.mouse.wheel(0, 400)
+        await page.wait_for_timeout(150)
+        assert await page.evaluate("scrollY") == scroll
+        await page.mouse.move(1200, 350)
+        await page.mouse.wheel(0, 400)
+        await page.wait_for_timeout(150)
+        assert await page.locator(".drawer-content").evaluate("el => el.scrollTop") > 0
+        assert await page.evaluate("scrollY") == scroll
+        await page.screenshot(path=str(output / "drawer-background-stationary.png"))
+        await page.keyboard.press("Escape")
+        await expect(drawer).to_have_count(0)
+        await expect(trigger).to_be_focused()
+        assert await page.locator("main").bounding_box() == background
+        assert await page.evaluate("scrollY") == scroll
+        assert not await page.locator("main").evaluate("main => main.inert")
+        await page.set_viewport_size({"width": 1440, "height": 1000})
         await page.get_by_role("button", name="启动设备", exact=True).click()
         await expect(
             page.get_by_role("button", name="停止设备", exact=True)
@@ -193,6 +245,8 @@ async def run(url, output):
     report = {
         "passed": True,
         "checks": [
+            "actual read-only storage directory at 1440/1024/390 widths",
+            "right drawer preserves workspace width and scroll, locks background and restores focus",
             "device creation",
             "start/stop",
             "assignment preview",

@@ -76,6 +76,9 @@ def check(binary, output):
                     if time.monotonic() > deadline:
                         raise TimeoutError("Frozen application did not become ready")
                     time.sleep(0.1)
+                assert http.get("/api/health").json()["storage"]["data_dir"] == str(
+                    data.resolve()
+                )
                 html = http.get("/devices/overview")
                 assert html.status_code == 200 and '<div id="app">' in html.text
                 assets = re.findall(r'(?:src|href)="(/assets/[^\"]+)"', html.text)
@@ -85,7 +88,7 @@ def check(binary, output):
                 assert http.get("/FONT-LICENSE.txt").status_code == 200
                 assert http.get("/api/missing").status_code == 404
                 checks.append(
-                    "bundled page/assets/fonts and deep links without system Python/PATH"
+                    "bundled page/assets/fonts, deep links and actual data directory without system Python/PATH"
                 )
                 keys = []
                 for unit in (1, 2, 3):

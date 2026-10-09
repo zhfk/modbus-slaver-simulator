@@ -71,7 +71,9 @@ class BodyLimit:
 def create_app(data_dir=None, static_dir=None):
     runtime = Runtime()
     modbus = ModbusService(runtime)
-    directory = Path(data_dir or os.environ.get("MODBUS_DATA_DIR", default_data_dir()))
+    directory = Path(
+        data_dir or os.environ.get("MODBUS_DATA_DIR", default_data_dir())
+    ).resolve()
     static = Path(static_dir or Path(__file__).parent / "static")
     context = {
         "storage": None,
@@ -482,6 +484,7 @@ def create_app(data_dir=None, static_dir=None):
             "max_loop_delay_ms": runtime.max_loop_delay * 1000,
             "storage": {
                 **storage().metrics_cache,
+                "data_dir": str(directory),
                 "queue_count": len(storage().queue),
                 "queue_bytes": storage().queue_bytes,
                 "dropped": storage().dropped,

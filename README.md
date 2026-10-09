@@ -10,17 +10,17 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 | [源码启动](#源码启动) | 修改代码、本地开发和自行构建 | Python 3.12、Node.js 22.12+、Git |
 | [wheel 部署](#wheel-部署需-python与升级) | 已有 Python 环境，自行分发安装包 | Python 3.12 和对应平台依赖 |
 
-当前版本为 `0.2.0rc5` 功能预发布。三个发布目标已完成原生检查，长期运行验收尚未通过；详细证据见 [验收记录](docs/acceptance.md)。
+当前版本为 `0.2.0rc6` 功能预发布。三个发布目标通过原生检查后才上传，长期运行验收尚未通过；详细证据见 [验收记录](docs/acceptance.md)。
 
 ## Release 包启动（推荐）
 
-在 [v0.2.0rc5 下载页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5) 的 **Assets** 中选择对应平台包。包内包含 Python、应用依赖、前端页面和离线字体；不要下载 `Source code` 代替独立运行包。完整解压并保留 `_internal/` 目录，不能只复制可执行文件。
+在 [v0.2.0rc6 下载页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc6) 的 **Assets** 中选择对应平台包。包内包含 Python、应用依赖、前端页面和离线字体；不要下载 `Source code` 代替独立运行包。完整解压并保留 `_internal/` 目录，不能只复制可执行文件。
 
 | 平台 | 下载文件 | 兼容与验证范围 |
 | --- | --- | --- |
-| Linux x86_64 | [modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc5/modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz) | Ubuntu 22.04 原生验证，glibc 2.35+；不支持 Alpine/musl |
-| Windows x64 | [modbus-simulator-0.2.0rc5-windows-x86_64.zip](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc5/modbus-simulator-0.2.0rc5-windows-x86_64.zip) | Windows Server 2022 原生验证，目标 Windows 10／11 尚须实机验收 |
-| macOS Apple Silicon | [modbus-simulator-0.2.0rc5-macos-arm64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc5/modbus-simulator-0.2.0rc5-macos-arm64.tar.gz) | macOS 15 原生验证，更老系统未验证；不提供 Intel 版本 |
+| Linux x86_64 | [modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc6/modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz) | Ubuntu 22.04 原生验证，glibc 2.35+；不支持 Alpine/musl |
+| Windows x64 | [modbus-simulator-0.2.0rc6-windows-x86_64.zip](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc6/modbus-simulator-0.2.0rc6-windows-x86_64.zip) | Windows Server 2022 原生验证，目标 Windows 10／11 尚须实机验收 |
+| macOS Apple Silicon | [modbus-simulator-0.2.0rc6-macos-arm64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc6/modbus-simulator-0.2.0rc6-macos-arm64.tar.gz) | macOS 15 原生验证，更老系统未验证；不提供 Intel 版本 |
 
 下载页的 `SHA256SUMS.txt` 可用于核对文件完整性。
 
@@ -29,8 +29,8 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 在下载文件所在目录执行：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz
-cd modbus-simulator-0.2.0rc5-linux-x86_64
+tar -xzf modbus-simulator-0.2.0rc6-linux-x86_64.tar.gz
+cd modbus-simulator-0.2.0rc6-linux-x86_64
 ./start.sh
 ```
 
@@ -39,8 +39,8 @@ cd modbus-simulator-0.2.0rc5-linux-x86_64
 解压 zip，进入包目录双击 `start.cmd`。也可在下载目录打开 PowerShell 执行：
 
 ```powershell
-Expand-Archive -Path .\modbus-simulator-0.2.0rc5-windows-x86_64.zip -DestinationPath .
-Set-Location .\modbus-simulator-0.2.0rc5-windows-x86_64
+Expand-Archive -Path .\modbus-simulator-0.2.0rc6-windows-x86_64.zip -DestinationPath .
+Set-Location .\modbus-simulator-0.2.0rc6-windows-x86_64
 .\start.cmd
 ```
 
@@ -49,8 +49,8 @@ Set-Location .\modbus-simulator-0.2.0rc5-windows-x86_64
 在下载文件所在目录执行：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc5-macos-arm64.tar.gz
-cd modbus-simulator-0.2.0rc5-macos-arm64
+tar -xzf modbus-simulator-0.2.0rc6-macos-arm64.tar.gz
+cd modbus-simulator-0.2.0rc6-macos-arm64
 ./start.command
 ```
 
@@ -138,6 +138,7 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 
 ## 功能
 
+- 操作采用右侧覆盖抽屉，主页面保持布局和滚动位置；存储设置展示后端实际数据目录，路径只读、可选中复制。
 - 多设备、共享端点与独立 Unit ID；支持功能码 1、2、3、4、5、6、15、16；可选启用 22、23 与设备身份读取 43／14。
 - 四类数据区；Bool、Int16、UInt16、Int32、UInt32、Float32、Float64；倍率、偏移、字节和寄存器顺序。
 - 原子批量写入、部分多寄存器写入、外部写入权限、未配置地址和有效地址范围。
@@ -216,13 +217,13 @@ npm --prefix frontend run build
 .venv/bin/python -m build --no-isolation
 ```
 
-Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc5-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
+Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc6-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
 
 Linux：在 wheel 与锁定文件所在目录运行：
 
 ```bash
 python3 -m venv "$HOME/modbus-simulator/venv"
-"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc5-py3-none-any.whl
+"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc6-py3-none-any.whl
 "$HOME/modbus-simulator/venv/bin/python" -m simulator.supervisor --data-dir "$HOME/.local/share/modbus-simulator" --port 8000
 ```
 
@@ -232,7 +233,7 @@ Windows PowerShell：在 wheel 与锁定文件所在目录运行：
 $AppDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulatorApp'
 $DataDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulator'
 py -3.12 -m venv "$AppDir\venv"
-& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc5-py3-none-any.whl
+& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc6-py3-none-any.whl
 & "$AppDir\venv\Scripts\python.exe" -m simulator.supervisor --data-dir $DataDir --port 8000
 ```
 

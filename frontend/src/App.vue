@@ -63,6 +63,25 @@ const addTemplate = ref(true),
   newPort = ref(1502),
   newUnit = ref(1);
 const deviceMemory = new Map<string, Row>();
+let scrollLock: { overflow: string; paddingRight: string } | null = null;
+function lockBackground(locked: boolean) {
+  const body = document.body;
+  if (locked && !scrollLock) {
+    const gutter = window.innerWidth - document.documentElement.clientWidth;
+    const padding = parseFloat(getComputedStyle(body).paddingRight) || 0;
+    scrollLock = {
+      overflow: body.style.overflow,
+      paddingRight: body.style.paddingRight,
+    };
+    body.style.overflow = "hidden";
+    if (gutter > 0) body.style.paddingRight = `${padding + gutter}px`;
+  } else if (!locked && scrollLock) {
+    body.style.overflow = scrollLock.overflow;
+    body.style.paddingRight = scrollLock.paddingRight;
+    scrollLock = null;
+  }
+}
+watch(modal, (kind) => lockBackground(Boolean(kind)), { flush: "sync" });
 let restoring = false;
 const detailLive = computed(() =>
   points.value.find((p) => p.id === editingId.value),
@@ -445,7 +464,7 @@ async function openModal(kind: string) {
   await nextTick();
   document
     .querySelector<HTMLElement>('[role="dialog"] input, [role="dialog"] button')
-    ?.focus();
+    ?.focus({ preventScroll: true });
   return true;
 }
 async function closeModal() {
@@ -460,7 +479,7 @@ async function closeModal() {
   modal.value = "";
   draftError.value = "";
   await nextTick();
-  focusReturn?.focus();
+  focusReturn?.focus({ preventScroll: true });
   return true;
 }
 function keydown(e: KeyboardEvent) {
@@ -998,6 +1017,7 @@ onMounted(async () => {
   timer = window.setInterval(poll, 1000);
 });
 onUnmounted(() => {
+  lockBackground(false);
   clearInterval(timer);
   socket?.close();
   document.removeEventListener("keydown", keydown);
@@ -1006,7 +1026,7 @@ onUnmounted(() => {
 
 <template>
   <div class="app-shell">
-    <aside class="sidebar" :class="{ open: showNav }">
+    <aside class="sidebar" :class="{ open: showNav }" :inert="Boolean(modal)">
       <div class="brand">
         <span class="brand-mark">M</span>
         <div><strong>Modbus Lab</strong><span>从机模拟器</span></div>
@@ -1035,7 +1055,7 @@ onUnmounted(() => {
         ><span>本机运行 · 后端提供页面</span>
       </div>
     </aside>
-    <main>
+    <main :inert="Boolean(modal)">
       <header class="page-header">
         <div class="title-group">
           <button
@@ -1536,9 +1556,9 @@ onUnmounted(() => {
         </section>
       </template>
     </main>
-    <div v-if="modal" class="modal-layer" @click.self="closeModal">
+    <div v-if="modal" class="drawer-layer" @click.self="closeModal">
       <section
-        class="dialog"
+        class="drawer"
         :class="{ wide: ['import', 'history'].includes(modal) }"
         role="dialog"
         aria-modal="true"
@@ -1549,9 +1569,9 @@ onUnmounted(() => {
             <span class="eyebrow">{{ device?.name || "工作区" }}</span>
             <h2 id="dialog-title">{{ modalTitle }}</h2>
           </div>
-          <button aria-label="关闭面板" @click="closeModal">关闭</button>
+          <button aria-label="关闭抽屉" @click="closeModal">关闭</button>
         </header>
-        <div class="dialog-content">
+        <div class="drawer-content">
           <div v-if="draftError" class="message error" role="alert">
             <pre>{{ draftError }}</pre>
             <button
@@ -2154,6 +2174,19 @@ onUnmounted(() => {
             </div>
           </div>
           <form v-if="modal === 'storage'" @submit.prevent="saveStorage">
+            <label
+              >当前数据目录<textarea
+                :value="health.storage.data_dir || ''"
+                readonly
+                rows="2"
+                placeholder="正在获取数据目录…"
+                aria-describedby="storage-directory-help"
+              />
+            </label>
+            <p id="storage-directory-help">
+              配置、历史、快照、备份和日志保存在此目录，可选中复制路径。更改目录请停止服务后使用
+              <code>--data-dir</code> 重新启动。
+            </p>
             <div class="health-summary">
               <span>磁盘余量 {{ bytes(health.storage.disk_free) }}</span
               ><span>最近快照 {{ clock(health.storage.last_snapshot) }}</span

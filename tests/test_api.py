@@ -16,6 +16,30 @@ def client(tmp_path):
         yield client
 
 
+@pytest.mark.parametrize("source", ["default", "environment", "argument"])
+def test_health_reports_effective_absolute_data_directory(
+    tmp_path, monkeypatch, source
+):
+    monkeypatch.chdir(tmp_path)
+    default = tmp_path / "默认数据 # 目录"
+    monkeypatch.setattr("simulator.api.default_data_dir", lambda: default)
+    argument = None
+    if source == "default":
+        monkeypatch.delenv("MODBUS_DATA_DIR", raising=False)
+        expected = default
+    else:
+        monkeypatch.setenv("MODBUS_DATA_DIR", "环境数据 # 目录")
+        expected = tmp_path / "环境数据 # 目录"
+        if source == "argument":
+            argument = "指定数据 # 目录"
+            expected = tmp_path / argument
+    with TestClient(create_app(argument)) as http:
+        assert http.get("/api/health").json()["storage"]["data_dir"] == str(
+            expected.resolve()
+        )
+        assert (expected / "config.db").is_file()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "failure", ["disconnect", "cancel", "invalid-range", "success"]
