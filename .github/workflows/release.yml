@@ -59,6 +59,7 @@ jobs:
       - name: Compile frontend
         run: |
           npm --prefix frontend ci
+          npm --prefix frontend test
           npm --prefix frontend run build
       - name: Create minimal build environment
         shell: bash

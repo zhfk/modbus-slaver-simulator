@@ -372,6 +372,7 @@ class DeviceRuntime:
         self.stamp = now
         self.progress = now
         if self.status != "running" or self.paused or self.config.faults.freeze:
+            self.sample_trends(now)
             return
         self.clock += delta
         staged, current = [], CycleValues(self)
@@ -405,10 +406,17 @@ class DeviceRuntime:
                 st.hold = True
         for key, words in staged:
             self.set_raw(key, words)
-        if self.clock - self.last_trend >= 1:
-            self.last_trend = self.clock
-            for key, cache in self.trends.items():
-                cache.append((time.time(), safe_number(current[key])))
+        self.sample_trends(now)
+
+    def sample_trends(self, now):
+        if not self.trends or now - self.last_trend < 1:
+            return
+        self.last_trend = now
+        at = time.time()
+        for key, cache in self.trends.items():
+            if cache and at < cache[-1][0]:
+                cache.clear()  # Start a new segment if the system clock moves back.
+            cache.append((at, safe_number(self.value(key))))
 
     def point_status(self, key):
         st, p = self.states[key], self.points[key]
@@ -522,6 +530,7 @@ class Runtime:
         self.capture_bytes = 0
         self.capture_limit = 4 * 1024 * 1024
         self.trend_touch = {}
+        self.last_trend_cleanup = 0
 
     def apply(self, config):
         previous = self.devices
@@ -543,6 +552,8 @@ class Runtime:
             self.loop_delay = max(0, now - expected)
             self.max_loop_delay = max(self.max_loop_delay, self.loop_delay)
             self.progress = now
+            if now - self.last_trend_cleanup >= 1:
+                self.expire_trends(now)
             for device in list(self.devices.values()):
                 device.tick(time.monotonic())
                 await asyncio.sleep(0)
@@ -581,20 +592,30 @@ class Runtime:
                 self.capture_until = 0
                 self.event("capture_limit", "", "捕获到达容量上限，已停止")
 
-    def subscribe(self, device_id, keys):
-        device = self.get(device_id)
-        if len(keys) > 4 or any(k not in device.points for k in keys):
-            raise DomainError("趋势最多选择 4 个有效点位")
-        now = time.monotonic()
+    def expire_trends(self, now):
+        self.last_trend_cleanup = now
         for rt in self.devices.values():
             for key in list(rt.trends):
                 if now - self.trend_touch.get(key, 0) > 90:
                     rt.trends.pop(key)
                     self.trend_touch.pop(key, None)
+
+    def subscribe(self, device_id, keys):
+        device = self.get(device_id)
+        if len(keys) > 4 or any(k not in device.points for k in keys):
+            raise DomainError("趋势最多选择 4 个有效点位")
+        now = time.monotonic()
+        self.expire_trends(now)
         total = sum(len(d.trends) for d in self.devices.values())
         if total + sum(k not in device.trends for k in keys) > 256:
             raise DomainError("趋势缓存已达上限", 429)
+        had_trends = bool(device.trends)
+        at = time.time()
         for key in keys:
-            device.trends.setdefault(key, deque(maxlen=600))
+            cache = device.trends.setdefault(key, deque(maxlen=600))
+            if not cache:
+                cache.append((at, safe_number(device.value(key))))
             self.trend_touch[key] = now
+        if keys and not had_trends:
+            device.last_trend = now
         return {key: list(device.trends[key]) for key in keys}

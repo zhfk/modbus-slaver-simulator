@@ -1,0 +1,43 @@
+{
+  "checked_at": "2026-10-09 22:50",
+  "timezone": "Asia/Shanghai",
+  "base_commit": "e26a19bd8fc640c0d2f387ea85d62b0f83c4e7a1",
+  "scope": "source-only main, after rc7",
+  "backend": {
+    "passed": 189,
+    "seconds": 54.07,
+    "warnings": 1
+  },
+  "frontend": {
+    "chart_tests_passed": 5,
+    "typecheck_build_passed": true,
+    "format_passed": true
+  },
+  "python_style": {
+    "format_passed": true,
+    "unused_imports_passed": true
+  },
+  "browser": {
+    "passed": true,
+    "checks": 47,
+    "page_errors": [],
+    "report": "artifacts/batch-trend-thermal-browser/browser.json"
+  },
+  "soak": {
+    "status": "passed",
+    "completed_seconds": 140.61,
+    "requests": 8316,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "b0ec6e6455ac7ab6b665774f9926b59c98881fb49641dd428c0e5b666c24622c",
+    "p99_ms": 18.887549013015814,
+    "failures": []
+  },
+  "release_published": false,
+  "remaining": [
+    "24/72 hour endurance",
+    "target user desktop systems",
+    "actual LAN and firewall environment"
+  ]
+}

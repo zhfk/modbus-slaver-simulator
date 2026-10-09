@@ -620,3 +620,187 @@ def test_application_log_rotates_and_keeps_total_below_fifty_mib(client):
     assert len(files) == 5
     assert sum(p.stat().st_size for p in files) <= 50 * 1024**2
     assert "rotation sample 119" in (directory / "application.log").read_text()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"ids": None},
+        {"ids": []},
+        {"ids": "device"},
+        {"ids": ["a", "a"]},
+        {"ids": [None]},
+        {"ids": [1]},
+        {"ids": [True]},
+        {"ids": [[]]},
+        {"ids": [{}]},
+        {"ids": [""]},
+        {"ids": ["a" * 65]},
+        {"ids": [str(i) for i in range(17)]},
+    ],
+)
+def test_batch_device_actions_validate_targets_without_side_effects(client, payload):
+    before = client.get("/api/config").json()
+    result = client.post("/api/devices/actions/start", json=payload)
+    assert result.status_code == 422, result.text
+    assert client.get("/api/config").json() == before
+    assert client.app.state.context["controls"] == 0
+    assert (
+        client.post("/api/devices/actions/delete", json={"ids": ["a"]}).status_code
+        == 404
+    )
+
+
+def test_batch_device_actions_keep_shared_listener_and_unselected_device(tmp_path):
+    import socket
+    import struct
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    with TestClient(create_app(tmp_path)) as http:
+        candidate = http.get("/api/config").json()
+        candidate["devices"] = [
+            {
+                "id": f"d{i}",
+                "name": f"从机{i}",
+                "port": port,
+                "unit_id": i,
+                "points": [
+                    {
+                        "id": f"p{i}",
+                        "name": "value",
+                        "area": "holding",
+                        "address": 0,
+                        "type": "UInt16",
+                        "initial": i * 10,
+                    }
+                ],
+            }
+            for i in range(1, 4)
+        ]
+        assert http.put("/api/config", json=candidate).status_code == 200
+        before = http.get("/api/config").json()
+        started = http.post("/api/devices/actions/start", json={"ids": ["d1", "d2"]})
+        assert started.status_code == 200, started.text
+        assert [item["outcome"] for item in started.json()["items"]] == [
+            "success",
+            "success",
+        ]
+        assert {d["id"]: d["status"] for d in http.get("/api/devices").json()} == {
+            "d1": "running",
+            "d2": "running",
+            "d3": "stopped",
+        }
+        assert len(http.app.state.modbus.endpoints) == 1
+
+        def read(unit):
+            with socket.create_connection(("127.0.0.1", port), timeout=2) as conn:
+                conn.sendall(struct.pack(">HHHBBHH", 7, 0, 6, unit, 3, 0, 1))
+                data = b""
+                while len(data) < 11:
+                    part = conn.recv(11 - len(data))
+                    assert part
+                    data += part
+                assert data[:9] == struct.pack(">HHHBBB", 7, 0, 5, unit, 3, 2)
+                return int.from_bytes(data[-2:], "big")
+
+        assert read(1) == 10 and read(2) == 20
+        stopped = http.post("/api/devices/actions/stop", json={"ids": ["d1"]}).json()
+        assert stopped["success"] == 1
+        assert read(2) == 20
+        assert len(http.app.state.modbus.endpoints) == 1
+        again = http.post(
+            "/api/devices/actions/stop", json={"ids": ["d1", "d2"]}
+        ).json()
+        assert again["skipped"] == 1 and again["success"] == 1 and again["failed"] == 0
+        assert len(http.app.state.modbus.endpoints) == 0
+        assert http.get("/api/config").json() == before
+        assert http.app.state.context["controls"] == 0
+
+
+def test_batch_start_continues_after_real_bind_failure_and_missing_device(client):
+    import socket
+
+    with socket.socket() as occupied, socket.socket() as unused:
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen()
+        unused.bind(("127.0.0.1", 0))
+        good_port = unused.getsockname()[1]
+        unused.close()
+        current = client.get("/api/config").json()
+        current["devices"] = [
+            {
+                "id": "bad",
+                "name": "occupied",
+                "port": occupied.getsockname()[1],
+                "points": [],
+            },
+            {"id": "good", "name": "available", "port": good_port, "points": []},
+        ]
+        assert client.put("/api/config", json=current).status_code == 200
+        result = client.post(
+            "/api/devices/actions/start", json={"ids": ["bad", "missing", "good"]}
+        )
+        assert result.status_code == 200, result.text
+        result = result.json()
+        assert result["failed"] == 2 and result["success"] == 1
+        assert [item["outcome"] for item in result["items"]] == [
+            "failed",
+            "failed",
+            "success",
+        ]
+        assert [item["status"] for item in result["items"]] == [
+            "fault",
+            None,
+            "running",
+        ]
+        assert [item["code"] for item in result["items"][:2]] == [409, 404]
+        retry = client.post("/api/devices/actions/start", json={"ids": ["good"]}).json()
+        assert retry["skipped"] == 1 and retry["success"] == 0
+        assert client.get("/api/health/ready").status_code == 200
+        assert client.app.state.context["controls"] == 0
+
+
+def test_batch_rejects_overlap_and_configuration_changes_without_queueing(
+    client, monkeypatch
+):
+    from concurrent.futures import ThreadPoolExecutor
+
+    key = template(client)
+    modbus = client.app.state.modbus
+    original = modbus.start
+    entered, release = threading.Event(), threading.Event()
+
+    async def delayed(key):
+        entered.set()
+        while not release.is_set():
+            await asyncio.sleep(0.01)
+        await original(key)
+
+    monkeypatch.setattr(modbus, "start", delayed)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            client.post, "/api/devices/actions/start", json={"ids": [key]}
+        )
+        try:
+            assert entered.wait(3)
+            assert (
+                client.post(
+                    "/api/devices/actions/stop", json={"ids": [key]}
+                ).status_code
+                == 409
+            )
+            current = client.get("/api/config").json()
+            current["devices"][0]["name"] = "changed during batch"
+            assert client.put("/api/config", json=current).status_code == 409
+            assert client.get("/api/health/ready").status_code == 200
+        finally:
+            release.set()
+        assert future.result(timeout=5).json()["success"] == 1
+    assert (
+        client.post("/api/devices/actions/stop", json={"ids": [key]}).json()["success"]
+        == 1
+    )
+    assert client.app.state.context["controls"] == 0

@@ -9,6 +9,7 @@ import {
   watch,
 } from "vue";
 import FeedbackBubbles, { type Feedback } from "./FeedbackBubbles.vue";
+import { buildTrendChart, nearestTrendPoint } from "./trend";
 type Row = Record<string, any>;
 const config = ref<Row>({ version: 0, devices: [], settings: {} });
 const devices = ref<Row[]>([]),
@@ -22,6 +23,23 @@ const tab = ref("monitor"),
   area = ref(""),
   filterState = ref(""),
   sort = ref("config");
+const selectedDevices = ref<string[]>([]);
+const batchResult = ref<Row | null>(null);
+const batchKind = ref("");
+const allDevicesSelected = computed(
+  () =>
+    devices.value.length > 0 &&
+    devices.value.every((d) => selectedDevices.value.includes(d.id)),
+);
+const selectedDeviceRows = computed(() =>
+  devices.value.filter((d) => selectedDevices.value.includes(d.id)),
+);
+const canBatchStop = computed(() =>
+  selectedDeviceRows.value.some((d) => d.status !== "stopped"),
+);
+const canBatchStart = computed(() =>
+  selectedDeviceRows.value.some((d) => ["stopped", "fault"].includes(d.status)),
+);
 const selected = ref<string[]>([]),
   notice = ref(""),
   error = ref(""),
@@ -39,6 +57,7 @@ const showNav = ref(false),
   pauseChart = ref(false),
   trendData = ref<Row>({}),
   trendKeys = ref<string[]>([]);
+const trendHoverX = ref<number | null>(null);
 const modal = ref(""),
   draft = ref<Row>({}),
   draftOriginal = ref(""),
@@ -101,6 +120,23 @@ const feedbackItems = computed<Feedback[]>(() => {
       message: draftError.value,
       kind: "alert",
     });
+  if (batchResult.value) {
+    const result = batchResult.value;
+    const verb = result.action === "start" ? "启动" : "停止";
+    items.push({
+      id: "batch",
+      title: `批量${verb}结果`,
+      kind: result.failed ? "alert" : "status",
+      message:
+        `已${verb} ${result.success} 台 · 已处于目标状态 ${result.skipped} 台 · 失败 ${result.failed} 台\n` +
+        result.items
+          .map(
+            (item: Row) =>
+              `${item.name}${item.unit_id != null ? `（Unit ${item.unit_id}，${item.host}:${item.port}）` : ""}：${item.message}`,
+          )
+          .join("\n"),
+    });
+  }
   const preview = importPreview.value;
   if (
     modal.value === "import" &&
@@ -154,7 +190,8 @@ const feedbackItems = computed<Feedback[]>(() => {
   return items;
 });
 function dismissFeedback(id: string) {
-  if (id === "notice") notice.value = "";
+  if (id === "batch") batchResult.value = null;
+  else if (id === "notice") notice.value = "";
   else if (id === "error") error.value = "";
   else if (id === "validation") draftError.value = "";
   else if (id === "import") showImportIssues.value = false;
@@ -405,7 +442,7 @@ function clone<T>(value: T): T {
 async function request(path: string, options: RequestInit = {}) {
   const response = await fetch(path, {
     ...options,
-    signal: AbortSignal.timeout(10000),
+    signal: options.signal ?? AbortSignal.timeout(10000),
     headers:
       options.body instanceof FormData
         ? options.headers
@@ -429,6 +466,7 @@ async function action(work: () => Promise<void>) {
   if (focused instanceof HTMLElement && !focused.closest(".feedback-popover"))
     feedbackOrigin.value = focused;
   busy.value = true;
+  batchResult.value = null;
   error.value = "";
   notice.value = "";
   draftError.value = "";
@@ -471,6 +509,9 @@ async function loadPoints() {
 }
 async function refreshDevices() {
   devices.value = await request("/api/devices");
+  selectedDevices.value = selectedDevices.value.filter((id) =>
+    devices.value.some((d) => d.id === id),
+  );
   if (!deviceId.value && devices.value.length)
     deviceId.value = devices.value[0]!.id;
   if (deviceId.value && !devices.value.some((d) => d.id === deviceId.value))
@@ -764,6 +805,7 @@ async function openModal(kind: string) {
   closeRowMenus(true);
   focusReturn = document.activeElement as HTMLElement;
   notice.value = "";
+  batchResult.value = null;
   modal.value = kind;
   draftError.value = "";
   await nextTick();
@@ -852,6 +894,49 @@ async function deviceAction(kind: string, key = deviceId.value) {
         : kind === "resume"
           ? `${target.name} 已恢复设备策略，点位手动保持仍需单独恢复`
           : `${target.name} 的设备操作已完成`;
+  });
+}
+function toggleAllDevices() {
+  selectedDevices.value = allDevicesSelected.value
+    ? []
+    : devices.value.map((d) => d.id);
+}
+async function batchDeviceAction(kind: string) {
+  const chosen = selectedDeviceRows.value.slice();
+  if (!chosen.length || busy.value) return;
+  if (
+    kind === "stop" &&
+    !confirm(
+      `停止以下 ${chosen.length} 台设备后，它们不再响应 Modbus 请求，是否继续？\n${chosen.map((d) => `${d.name}（Unit ${d.unit_id}）`).join("\n")}`,
+    )
+  )
+    return;
+  closeDeviceMenu();
+  closeRuntimeStatus();
+  closeTrend();
+  closeRowMenus();
+  await action(async () => {
+    batchKind.value = kind;
+    try {
+      const result = await request(`/api/devices/actions/${kind}`, {
+        method: "POST",
+        body: JSON.stringify({ ids: chosen.map((d) => d.id) }),
+        signal: AbortSignal.timeout(65000),
+      });
+      feedbackOrigin.value = document.getElementById("device-select-all");
+      batchResult.value = result;
+    } catch (e) {
+      const message =
+        e instanceof DOMException &&
+        ["TimeoutError", "AbortError"].includes(e.name)
+          ? "批量请求未确认完成，请刷新设备状态后核对结果"
+          : (e as Error).message;
+      throw new Error(message);
+    } finally {
+      batchKind.value = "";
+      await refreshDevices();
+      await loadPoints();
+    }
   });
 }
 function validateDeviceEndpoint(
@@ -1084,6 +1169,20 @@ function changeWriteMode() {
 async function savePoint() {
   await action(async () => {
     const point = clone(draft.value);
+    if (point.strategy.kind === "thermal") {
+      const dependencies = point.strategy.dependencies;
+      if (
+        dependencies.length !== 2 ||
+        new Set(dependencies).size !== 2 ||
+        dependencies.some(
+          (id: string) =>
+            !deviceConfig.value.points.some(
+              (p: Row) => p.id === id && p.id !== point.id,
+            ),
+        )
+      )
+        throw new Error("请选择两个不同的依赖点位：启动命令和目标温度");
+    }
     if (
       point.type === "Bool" &&
       !booleanStrategies.includes(point.strategy.kind)
@@ -1132,6 +1231,8 @@ async function savePoint() {
     else d.points.push(point);
     await saveConfig(candidate);
     modal.value = "";
+    if (device.value?.paused)
+      notice.value += "；设备策略仍暂停，请在设备菜单恢复策略";
   });
 }
 async function deletePoints(ids: string[]) {
@@ -1314,6 +1415,7 @@ async function viewTrend(point: Row, event?: Event) {
   closeDeviceMenu();
   trendKeys.value = [point.id];
   trendData.value = {};
+  trendHoverX.value = null;
   pauseChart.value = false;
   trendAnchor =
     event?.currentTarget instanceof HTMLElement
@@ -1336,6 +1438,7 @@ function closeTrend() {
   showTrend.value = false;
   trendKeys.value = [];
   trendData.value = {};
+  trendHoverX.value = null;
 }
 function trendToggled(event: Event) {
   const popup = event.target as HTMLElement;
@@ -1405,56 +1508,51 @@ function keyboardMoveTrend(event: KeyboardEvent) {
   const step = event.shiftKey ? 40 : 10;
   moveTrend(bounds.left + delta[0] * step, bounds.top + delta[1] * step);
 }
-function chartTicks(key: string) {
-  const data = trendData.value[key] as [number, number | null][] | undefined;
-  if (!data?.length) return [];
-  const first = data[0]![0],
-    last = data.at(-1)![0];
-  const count = last > first ? 7 : 1;
-  const crossDate =
-    new Date(first * 1000).toDateString() !==
-    new Date(last * 1000).toDateString();
-  return Array.from({ length: count }, (_, i) => {
-    const time = first + ((last - first) * i) / Math.max(1, count - 1);
-    const date = new Date(time * 1000);
-    return {
-      label: clock(time),
-      date: crossDate ? `${date.getMonth() + 1}/${date.getDate()}` : "",
-      full: date.toLocaleString(),
-      index: i,
-    };
-  });
+const trendCharts = computed(() =>
+  Object.fromEntries(
+    trendKeys.value.map((key) => [
+      key,
+      buildTrendChart(
+        trendData.value[key] || [],
+        deviceConfig.value?.points.find((p: Row) => p.id === key)?.type ===
+          "Bool",
+      ),
+    ]),
+  ),
+);
+const trendHover = computed(() =>
+  trendHoverX.value == null
+    ? null
+    : nearestTrendPoint(
+        trendCharts.value[trendKeys.value[0]]?.points || [],
+        trendHoverX.value,
+      ),
+);
+function hoverTrend(event: PointerEvent) {
+  const bounds = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
+  trendHoverX.value = Math.max(
+    20,
+    Math.min(680, ((event.clientX - bounds.left) / bounds.width) * 700),
+  );
 }
-function chartPath(key: string) {
-  const data = (trendData.value[key] as [number, number | null][]) || [];
-  const valid = data.filter((row) => row[1] != null);
-  if (!valid.length) return "";
-  const min = Math.min(...valid.map((r) => r[1] as number)),
-    max = Math.max(...valid.map((r) => r[1] as number));
-  const first = data[0]![0],
-    last = data.at(-1)![0];
-  let open = false;
-  return data
-    .map(([t, v]) => {
-      if (v == null) {
-        open = false;
-        return "";
-      }
-      const x = 20 + ((t - first) / Math.max(0.001, last - first)) * 660,
-        y = 115 - ((v - min) / Math.max(0.001, max - min)) * 95;
-      const part = `${open ? "L" : "M"}${x.toFixed(2)},${y.toFixed(2)}`;
-      open = true;
-      return part;
-    })
-    .join(" ");
-}
-function chartRange(key: string) {
-  const values = (trendData.value[key] || [])
-    .map((r: [number, number | null]) => r[1])
-    .filter((v: number | null) => v != null);
-  return values.length
-    ? `${Math.min(...values).toFixed(2)} ～ ${Math.max(...values).toFixed(2)}`
-    : "等待采样";
+function keyboardInspectTrend(event: KeyboardEvent) {
+  if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  const points = trendCharts.value[trendKeys.value[0]]?.points || [];
+  if (!points.length) return;
+  const current = trendHover.value;
+  let index = current ? points.indexOf(current) : -1;
+  if (event.key === "Home") index = 0;
+  else if (event.key === "End") index = points.length - 1;
+  else
+    index = Math.max(
+      0,
+      Math.min(
+        points.length - 1,
+        index + (event.key === "ArrowRight" ? 1 : -1),
+      ),
+    );
+  trendHoverX.value = points[index].x;
 }
 async function capturePackets() {
   await action(async () => {
@@ -1554,6 +1652,37 @@ onUnmounted(() => {
           >切换中 {{ deviceCounts.transition }}</span
         >
       </div>
+      <div
+        v-if="devices.length"
+        class="device-batch-controls"
+        aria-label="批量设备操作"
+      >
+        <label
+          ><input
+            type="checkbox"
+            id="device-select-all"
+            aria-label="选择全部设备"
+            :checked="allDevicesSelected"
+            :indeterminate="selectedDevices.length > 0 && !allDevicesSelected"
+            :disabled="busy"
+            @change="toggleAllDevices"
+          />全选<span>已选 {{ selectedDevices.length }} 台</span></label
+        >
+        <div class="device-batch-buttons">
+          <button
+            :disabled="busy || !canBatchStart"
+            @click="batchDeviceAction('start')"
+          >
+            {{ batchKind === "start" ? "启动中…" : "批量启动" }}
+          </button>
+          <button
+            :disabled="busy || !canBatchStop"
+            @click="batchDeviceAction('stop')"
+          >
+            {{ batchKind === "stop" ? "停止中…" : "批量停止" }}
+          </button>
+        </div>
+      </div>
       <nav aria-label="设备列表">
         <div
           v-for="d in devices"
@@ -1561,6 +1690,14 @@ onUnmounted(() => {
           class="device-card"
           @contextmenu="openDeviceMenu($event, d.id)"
         >
+          <input
+            type="checkbox"
+            class="device-selection"
+            :aria-label="`选择设备 ${d.name}`"
+            :value="d.id"
+            v-model="selectedDevices"
+            :disabled="busy"
+          />
           <button
             :id="`device-card-${d.id}`"
             class="device-link"
@@ -1944,28 +2081,88 @@ onUnmounted(() => {
                 deviceConfig.points.find((p: Row) => p.id === key)?.name
               }}</strong
               ><span
-                >{{ chartRange(key) }}
+                >{{ trendCharts[key]?.range }}
                 {{
                   deviceConfig.points.find((p: Row) => p.id === key)?.unit
                 }}</span
               >
             </div>
-            <svg
-              viewBox="0 0 700 140"
-              role="img"
-              :aria-label="
-                '点位 ' +
-                deviceConfig.points.find((p: Row) => p.id === key)?.name +
-                ' 的实时趋势'
-              "
+            <div class="trend-plot">
+              <div class="chart-y-axis" aria-label="数值轴">
+                <span
+                  v-for="(tick, i) in trendCharts[key]?.yTicks"
+                  :key="i"
+                  :style="{ top: tick.position + '%' }"
+                  >{{ tick.label }}</span
+                >
+              </div>
+              <svg
+                viewBox="0 0 700 140"
+                preserveAspectRatio="none"
+                role="img"
+                tabindex="0"
+                aria-describedby="trend-sample-tooltip"
+                @pointermove="hoverTrend"
+                @pointerdown="hoverTrend"
+                @pointerleave="trendHoverX = null"
+                @keydown="keyboardInspectTrend"
+                @blur="trendHoverX = null"
+                :aria-label="
+                  '点位 ' +
+                  deviceConfig.points.find((p: Row) => p.id === key)?.name +
+                  ' 的实时趋势'
+                "
+              >
+                <path class="axis" d="M20 10V120H690" />
+                <path class="signal" :d="trendCharts[key]?.path" />
+                <g v-if="trendHover" class="chart-crosshair">
+                  <path :d="`M${trendHover.x} 10V120`" />
+                  <circle :cx="trendHover.x" :cy="trendHover.y" r="5" />
+                </g>
+                <circle
+                  v-for="(point, i) in trendCharts[key]?.markers"
+                  :key="i"
+                  class="sample-marker"
+                  :cx="point.x"
+                  :cy="point.y"
+                  r="4"
+                >
+                  <title>
+                    {{ new Date(point.time * 1000).toLocaleString() }} ·
+                    {{ point.value }}
+                  </title>
+                </circle>
+              </svg>
+              <div
+                v-if="trendHover"
+                id="trend-sample-tooltip"
+                role="tooltip"
+                class="chart-tooltip"
+              >
+                <span>{{
+                  new Date(trendHover.time * 1000).toLocaleString()
+                }}</span>
+                <strong
+                  >采样值：{{ trendHover.value }}
+                  {{
+                    deviceConfig.points.find((p: Row) => p.id === key)?.unit
+                  }}</strong
+                >
+              </div>
+              <span v-if="!trendCharts[key]?.path" class="chart-empty">{{
+                trendCharts[key]?.count
+                  ? "暂无有效数值，非有限值不绘制"
+                  : "等待首个采样"
+              }}</span>
+            </div>
+            <div
+              class="chart-axis"
+              :class="{ single: trendCharts[key]?.ticks.length === 1 }"
+              aria-label="时间轴"
             >
-              <path class="axis" d="M20 10V120H690" />
-              <path class="signal" :d="chartPath(key)" />
-            </svg>
-            <div class="chart-axis" aria-label="时间轴">
-              <span v-if="!chartTicks(key).length">等待采样</span>
+              <span v-if="!trendCharts[key]?.ticks.length">等待采样</span>
               <span
-                v-for="tick in chartTicks(key)"
+                v-for="tick in trendCharts[key]?.ticks"
                 :key="tick.index"
                 class="chart-tick"
                 :class="{ 'mobile-tick': tick.index % 3 === 0 }"
@@ -1974,6 +2171,18 @@ onUnmounted(() => {
                 >{{ tick.label }}</span
               >
             </div>
+            <p class="chart-note">
+              {{
+                device.status === "running"
+                  ? device.paused
+                    ? "设备策略暂停 · 仍采集当前值"
+                    : deviceConfig.faults.freeze
+                      ? "策略冻结 · 仍采集当前值"
+                      : "实时采样"
+                  : "设备已停止 · 仍采集当前值"
+              }}
+              · {{ trendCharts[key]?.count || 0 }} 个采样
+            </p>
           </div>
         </section>
         <section v-if="tab === 'diagnostics'" class="panel">
@@ -2485,7 +2694,7 @@ onUnmounted(() => {
                 ><input
                   type="checkbox"
                   v-model="draft.strategy.enabled"
-                />启用策略</label
+                />启用此点位策略</label
               ><label
                 v-if="draft.type === 'Bool' && draft.strategy.kind === 'fixed'"
                 >固定值<select
@@ -2512,11 +2721,9 @@ onUnmounted(() => {
             </div>
             <label
               v-if="
-                ['link', 'expression', 'thermal', 'alarm'].includes(
-                  draft.strategy.kind,
-                )
+                ['link', 'expression', 'alarm'].includes(draft.strategy.kind)
               "
-              >依赖点位（温控：先启动命令，再目标温度）<select
+              >依赖点位<select
                 aria-label="依赖点位"
                 v-model="draft.strategy.dependencies"
                 multiple
@@ -2532,7 +2739,38 @@ onUnmounted(() => {
                   {{ p.name }} · {{ areaNames[p.area] }} {{ p.address }}
                 </option>
               </select></label
-            ><label v-if="draft.strategy.kind === 'expression'"
+            >
+            <template v-if="draft.strategy.kind === 'thermal'">
+              <div class="form-grid">
+                <label
+                  v-for="(label, index) in ['启动命令依赖', '目标温度依赖']"
+                  :key="index"
+                >
+                  {{ label }}
+                  <select
+                    :aria-label="label"
+                    v-model="draft.strategy.dependencies[index]"
+                    required
+                  >
+                    <option value="" disabled>请选择点位</option>
+                    <option
+                      v-for="p in deviceConfig.points.filter(
+                        (p: Row) => p.id !== draft.id,
+                      )"
+                      :key="p.id"
+                      :value="p.id"
+                    >
+                      {{ p.name }} · {{ p.type }} · {{ areaNames[p.area] }}
+                      {{ p.address }}
+                    </option>
+                  </select>
+                </label>
+              </div>
+              <p class="hint">
+                可自主选择同一设备内的两个不同点位。启动命令非零时向目标温度变化，为零时向环境温度变化；目标温度点位提供设定值，请使用一致的温度单位。
+              </p>
+            </template>
+            <label v-if="draft.strategy.kind === 'expression'"
               >表达式（t、x0、x1 与四则运算）<input
                 v-model="draft.strategy.params.expression"
                 placeholder="x0 * 0.5 + t" /></label

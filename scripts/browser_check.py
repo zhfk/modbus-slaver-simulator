@@ -34,12 +34,17 @@ async def run(url, output):
         discard_confirmations = []
         device_confirmations = []
         reject_delete = False
+        reject_batch_stop = False
 
         async def handle_dialog(dialog):
             if any(
-                word in dialog.message for word in ("停止 ", "删除 ", "的全部点位恢复")
+                word in dialog.message
+                for word in ("停止 ", "停止以下 ", "删除 ", "的全部点位恢复")
             ):
                 device_confirmations.append(dialog.message)
+                if reject_batch_stop and dialog.message.startswith("停止以下 "):
+                    await dialog.dismiss()
+                    return
                 if reject_delete and dialog.message.startswith("删除 "):
                     await dialog.dismiss()
                     return
@@ -325,6 +330,16 @@ async def run(url, output):
         await expect(
             page.get_by_role("region", name="运行状态", exact=True)
         ).to_contain_text("已暂停")
+        await page.get_by_role("button", name="实际温度", exact=True).click()
+        await expect(page.get_by_label("启用此点位策略", exact=True)).to_be_checked()
+        await page.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(page.get_by_role("dialog")).to_have_count(0)
+        await expect(
+            page.get_by_role("status", name="操作提示", exact=True)
+        ).to_contain_text("设备策略仍暂停")
+        await expect(
+            page.locator(".device-link").filter(has_text="验收温控设备")
+        ).to_contain_text("策略暂停")
         await device_action("验收温控设备", "恢复策略")
         await expect(
             page.locator("#device-context-menu").get_by_role(
@@ -425,6 +440,27 @@ async def run(url, output):
                 1000 if width > 500 else 844
             )
             await expect(popup.locator(".chart-tick")).to_have_count(7)
+            await expect(popup.locator(".chart-y-axis span")).to_have_count(3)
+            assert await popup.locator(".signal").get_attribute("d")
+            await expect(popup.locator(".sample-marker").first).to_be_visible()
+            chart_svg = popup.locator("svg")
+            chart_bounds = await chart_svg.bounding_box()
+            await page.mouse.move(
+                chart_bounds["x"] + chart_bounds["width"] * 0.6, chart_bounds["y"] + 80
+            )
+            tooltip = popup.get_by_role("tooltip")
+            await expect(tooltip).to_contain_text("采样值：75.3")
+            tooltip_bounds = await tooltip.bounding_box()
+            assert (
+                tooltip_bounds["x"] >= 0
+                and tooltip_bounds["x"] + tooltip_bounds["width"] <= width
+            )
+            await chart_svg.focus()
+            await page.keyboard.press("Home")
+            await expect(tooltip).to_contain_text("采样值：75.3")
+            await page.keyboard.press("End")
+            await expect(popup.locator(".chart-crosshair")).to_be_visible()
+            await page.screenshot(path=str(output / f"trend-tooltip-{width}.png"))
             visible_ticks = await popup.locator(".chart-tick").evaluate_all(
                 "ticks => ticks.filter(tick => getComputedStyle(tick).display !== 'none').length"
             )
@@ -578,6 +614,43 @@ async def run(url, output):
         # Both creation modes and editing must reject the same endpoint/unit
         # without changing persisted state or discarding the user's form.
         before = await (await page.request.get(url + "/api/config")).json()
+        # Choose the target first: roles must not depend on selection or list order.
+        command_id = next(
+            p["id"] for p in before["devices"][0]["points"] if p["name"] == "启动命令"
+        )
+        custom_id = next(
+            p["id"] for p in before["devices"][0]["points"] if p["name"] == "随机测试点"
+        )
+        await page.get_by_role("button", name="实际温度", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        await dialog.get_by_label("策略类型", exact=True).select_option("none")
+        await dialog.get_by_label("策略类型", exact=True).select_option("thermal")
+        await dialog.get_by_label("目标温度依赖", exact=True).select_option(custom_id)
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_be_visible()
+        assert await (await page.request.get(url + "/api/config")).json() == before
+        await dialog.get_by_label("启动命令依赖", exact=True).select_option(custom_id)
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(
+            dialog.get_by_role("alert", name="校验提示", exact=True)
+        ).to_contain_text("两个不同")
+        assert await (await page.request.get(url + "/api/config")).json() == before
+        await dialog.get_by_label("启动命令依赖", exact=True).select_option(command_id)
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        before = await (await page.request.get(url + "/api/config")).json()
+        actual = next(
+            p for p in before["devices"][0]["points"] if p["name"] == "实际温度"
+        )
+        assert actual["strategy"]["dependencies"] == [command_id, custom_id]
+        await page.get_by_role("button", name="实际温度", exact=True).click()
+        await expect(page.get_by_label("启动命令依赖", exact=True)).to_have_value(
+            command_id
+        )
+        await expect(page.get_by_label("目标温度依赖", exact=True)).to_have_value(
+            custom_id
+        )
+        await page.keyboard.press("Escape")
         for mode in ("温控模板（4 个联动点位）", "空设备"):
             await page.get_by_role("button", name="新建设备", exact=True).click()
             dialog = page.get_by_role("dialog")
@@ -971,11 +1044,189 @@ async def run(url, output):
         await page.screenshot(path=str(output / "import-validation.png"))
         await dialog.get_by_role("button", name="关闭抽屉", exact=True).click()
         await expect(dialog).to_have_count(0)
+        # Batch controls select device IDs independently of the current workspace.
+        with socket.socket() as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            occupied.listen()
+            candidate = await (await page.request.get(url + "/api/config")).json()
+            first = candidate["devices"][0]
+            candidate["devices"].extend(
+                [
+                    {
+                        "id": "batch-second",
+                        "name": "批量设备 2#",
+                        "host": first["host"],
+                        "port": first["port"],
+                        "unit_id": 2,
+                        "points": [],
+                    },
+                    {
+                        "id": "batch-fault",
+                        "name": "批量故障设备",
+                        "host": "127.0.0.1",
+                        "port": occupied.getsockname()[1],
+                        "unit_id": 1,
+                        "points": [],
+                    },
+                    {
+                        "id": "batch-third",
+                        "name": "批量设备 3#",
+                        "host": first["host"],
+                        "port": first["port"],
+                        "unit_id": 3,
+                        "points": [],
+                    },
+                ]
+            )
+            response = await page.request.put(url + "/api/config", data=candidate)
+            assert response.status == 200, await response.text()
+            await page.reload()
+            controls = page.get_by_label("批量设备操作", exact=True)
+            start_button, stop_button = (
+                controls.locator("button").nth(0),
+                controls.locator("button").nth(1),
+            )
+            await expect(start_button).to_be_disabled()
+            await expect(stop_button).to_be_disabled()
+            baseline = await page.locator("main").bounding_box()
+            await page.get_by_label("选择设备 验收温控设备", exact=True).check()
+            await page.get_by_label("选择设备 批量设备 2#", exact=True).check()
+            await expect(controls).to_contain_text("已选 2 台")
+            assert await page.locator("main").bounding_box() == baseline
+            await expect(
+                page.get_by_role("heading", name="验收温控设备", exact=True)
+            ).to_be_visible()
+            all_devices = page.get_by_label("选择全部设备", exact=True)
+            assert await all_devices.evaluate("input => input.indeterminate")
+            gate = asyncio.Event()
+            batch_start_url = url + "/api/devices/actions/start"
+            batch_requests = []
+
+            async def pending_batch(route):
+                batch_requests.append(route.request.post_data_json)
+                await gate.wait()
+                await route.continue_()
+
+            await page.route(batch_start_url, pending_batch)
+            try:
+                await start_button.click()
+                await expect(start_button).to_be_disabled()
+                await expect(stop_button).to_be_disabled()
+                await expect(all_devices).to_be_disabled()
+                await expect(
+                    page.get_by_label("选择设备 批量设备 3#", exact=True)
+                ).to_be_disabled()
+                await start_button.evaluate("button => button.click()")
+                await page.wait_for_timeout(100)
+                assert batch_requests == [{"ids": [first["id"], "batch-second"]}], (
+                    batch_requests
+                )
+            finally:
+                gate.set()
+            result = page.get_by_role("status", name="批量启动结果", exact=True)
+            await expect(result).to_contain_text("已启动 1 台")
+            await expect(result).to_contain_text("已处于目标状态 1 台")
+            await expect(result).to_contain_text("失败 0 台")
+            await expect(result).to_contain_text("批量设备 2#")
+            await page.unroute(batch_start_url, pending_batch)
+            actual = {
+                d["id"]: d["status"]
+                for d in await (await page.request.get(url + "/api/devices")).json()
+            }
+            assert (
+                actual["batch-second"] == "running"
+                and actual["batch-third"] == "stopped"
+            )
+            assert await page.locator("main").bounding_box() == baseline
+            await result.get_by_role(
+                "button", name="关闭批量启动结果", exact=True
+            ).click()
+            await expect(all_devices).to_be_focused()
+            await all_devices.check()
+            await all_devices.uncheck()
+            await page.get_by_label("选择设备 批量故障设备", exact=True).check()
+            await page.get_by_label("选择设备 批量设备 3#", exact=True).check()
+            await start_button.click()
+            failed_batch = page.get_by_role("alert", name="批量启动结果", exact=True)
+            await expect(failed_batch).to_contain_text("失败 1 台")
+            await expect(failed_batch).to_contain_text("已启动 1 台")
+            await expect(failed_batch).to_contain_text("批量故障设备")
+            actual = {
+                d["id"]: d["status"]
+                for d in await (await page.request.get(url + "/api/devices")).json()
+            }
+            assert (
+                actual["batch-fault"] == "fault" and actual["batch-third"] == "running"
+            )
+            await failed_batch.get_by_role(
+                "button", name="关闭批量启动结果", exact=True
+            ).click()
+            await all_devices.check()
+            reject_batch_stop = True
+            await stop_button.click()
+            reject_batch_stop = False
+            await expect(
+                page.locator(".device-link").filter(has_text="批量设备 3#")
+            ).to_contain_text("运行中")
+            assert device_confirmations[-1].startswith("停止以下 4 台设备")
+            assert all(
+                name in device_confirmations[-1]
+                for name in (
+                    "验收温控设备",
+                    "批量设备 2#",
+                    "批量设备 3#",
+                    "批量故障设备",
+                )
+            )
+            for width in (1440, 1024, 390):
+                await page.set_viewport_size({"width": width, "height": 844})
+                if not await controls.is_visible():
+                    await page.get_by_role(
+                        "button", name="展开设备导航", exact=True
+                    ).click()
+                await expect(controls).to_contain_text("已选 4 台")
+                bounds = await controls.bounding_box()
+                assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+                assert not await page.evaluate(
+                    "document.documentElement.scrollWidth > innerWidth"
+                )
+                await page.screenshot(path=str(output / f"batch-devices-{width}.png"))
+            await stop_button.click()
+            stopped = page.get_by_role("status", name="批量停止结果", exact=True)
+            await expect(stopped).to_contain_text("已停止 4 台")
+            await expect(stopped).to_contain_text("失败 0 台")
+            bounds = await stopped.bounding_box()
+            assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 390
+            assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 844
+            await page.screenshot(path=str(output / "batch-results-390.png"))
+            actual = await (await page.request.get(url + "/api/devices")).json()
+            assert all(d["status"] == "stopped" for d in actual)
+            await stopped.get_by_role(
+                "button", name="关闭批量停止结果", exact=True
+            ).click()
+            await all_devices.focus()
+            await page.keyboard.press("Space")
+            await expect(controls).to_contain_text("已选 0 台")
+            await page.get_by_label("选择设备 批量故障设备", exact=True).check()
+            await page.set_viewport_size({"width": 1440, "height": 1000})
+            await device_action("批量故障设备", "删除设备")
+            await expect(controls).to_contain_text("已选 0 台")
+            await expect(start_button).to_be_disabled()
+            await expect(stop_button).to_be_disabled()
+            await expect(
+                page.get_by_label("选择设备 批量故障设备", exact=True)
+            ).to_have_count(0)
         assert not failures, failures
         await browser.close()
     report = {
         "passed": True,
         "checks": [
+            "thermal roles chosen independently in any order, custom target retained, missing/duplicate dependencies rejected without losing draft",
+            "saving enabled point on paused device preserves pause and explains explicit device resume",
+            "real constant trend visible with adaptive Y ticks, nearest-sample tooltip and keyboard inspection at 1440/1024/390",
+            "batch device checkbox/all selection at 1440/1024/390, keyboard, workspace preserved and deleted IDs pruned",
+            "batch start/stop targets only selected devices, partial bind failure continues, skipped states and confirmation cancellation",
+            "batch pending disables selection/repeated submission; persistent per-device results, phone bounds and focus return",
             "device status colors and live counts, including real TCP bind failure and fault-device deletion",
             "dedicated trend action, pointer and keyboard dragging clamped to viewport, position retained during refresh",
             "seven desktop time ticks and three mobile ticks with Chinese protocol address and function/identity descriptions",

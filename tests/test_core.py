@@ -87,7 +87,7 @@ def test_trend_resumes_within_one_second_after_explicit_reset():
     runtime.subscribe(config.id, [point.id])
     device.status = "running"
     device.tick(device.stamp + 1.1)
-    assert len(runtime.subscribe(config.id, [point.id])[point.id]) == 1
+    assert len(runtime.subscribe(config.id, [point.id])[point.id]) == 2
 
 
 @pytest.mark.parametrize(
@@ -338,3 +338,113 @@ async def test_optional_mask_read_write_and_identity():
     )
     individual = endpoint.process(device, bytes.fromhex("2b0e0401"))
     assert individual[6] == 1 and individual[7] == 1 and individual.endswith(b"Model")
+
+
+@pytest.mark.parametrize("mode", ["stopped", "paused", "freeze", "held", "disabled"])
+def test_trend_observes_real_values_without_advancing_paused_strategies(
+    monkeypatch, mode
+):
+    clock = {"mono": 100.0, "wall": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["mono"])
+    monkeypatch.setattr(time, "time", lambda: clock["wall"])
+    point = Point(
+        name="signal", initial=25, strategy=Strategy(kind="fixed", params={"value": 99})
+    )
+    config = Device(points=[point])
+    runtime = Runtime()
+    runtime.apply(Configuration(devices=[config]))
+    device = runtime.get(config.id)
+    device.status = "stopped" if mode == "stopped" else "running"
+    device.paused = mode == "paused"
+    device.config.faults.freeze = mode == "freeze"
+    device.states[point.id].hold = mode == "held"
+    device.states[point.id].enabled = mode != "disabled"
+    assert runtime.subscribe(config.id, [point.id])[point.id] == [(1000, 25)]
+    clock.update(mono=100.5, wall=1000.5)
+    device.tick(clock["mono"])
+    assert len(device.trends[point.id]) == 1
+    device.set_raw(point.id, encode(point, 42), "manual")
+    clock.update(mono=101.1, wall=1001.1)
+    device.tick(clock["mono"])
+    assert list(device.trends[point.id]) == [(1000, 25), (1001.1, 42)]
+    if mode in ("stopped", "paused", "freeze"):
+        assert device.clock == 0
+    assert device.value(point.id) == 42
+
+
+def test_trend_cache_is_bounded_expires_and_handles_clock_rollback(monkeypatch):
+    clock = {"mono": 100.0, "wall": 1000.0}
+    monkeypatch.setattr(time, "monotonic", lambda: clock["mono"])
+    monkeypatch.setattr(time, "time", lambda: clock["wall"])
+    point = Point(name="signal")
+    config = Device(points=[point])
+    runtime = Runtime()
+    runtime.apply(Configuration(devices=[config]))
+    device = runtime.get(config.id)
+    runtime.subscribe(config.id, [point.id])
+    for _ in range(700):
+        clock["mono"] += 1.1
+        clock["wall"] += 1.1
+        device.tick(clock["mono"])
+        runtime.subscribe(config.id, [point.id])
+    assert len(device.trends[point.id]) == 600
+    clock["mono"] += 1.1
+    clock["wall"] = 500
+    device.tick(clock["mono"])
+    assert list(device.trends[point.id]) == [(500, 0)]
+    clock["mono"] += 91
+    runtime.expire_trends(clock["mono"])
+    assert not device.trends and not runtime.trend_touch
+    assert runtime.subscribe(config.id, [point.id])[point.id] == [(500, 0)]
+
+
+def test_trend_nonfinite_value_is_a_gap_not_fake_zero():
+    point = Point(name="signal", type="Float32", writable=True)
+    config = Device(points=[point])
+    runtime = Runtime()
+    runtime.apply(Configuration(devices=[config]))
+    runtime.get(config.id).write("holding", 0, [0x7F80, 0], "external")
+    assert runtime.subscribe(config.id, [point.id])[point.id][0][1] is None
+
+
+@pytest.mark.parametrize("dependencies", [[], ["a"], ["a", "a"], ["a", "b", "c"]])
+def test_thermal_requires_two_distinct_ordered_dependencies(dependencies):
+    with pytest.raises(ValidationError, match="两个不同依赖"):
+        Strategy(kind="thermal", dependencies=dependencies)
+
+
+def test_thermal_uses_custom_dependencies_in_role_order_and_preserves_device_pause():
+    command = Point(
+        id="enable", name="custom command", area="coil", type="Bool", initial=True
+    )
+    target = Point(id="target", name="custom target", type="Float32", initial=70)
+    actual = Point(
+        id="actual",
+        name="custom reading",
+        type="Float32",
+        address=2,
+        initial=25,
+        strategy=Strategy(
+            kind="thermal",
+            dependencies=[command.id, target.id],
+            params={"response_time": 1, "noise": 0},
+        ),
+    )
+    # List order does not determine the two dependency roles.
+    config = Device(points=[target, actual, command])
+    device = DeviceRuntime(config)
+    device.status = "running"
+    device.tick(device.stamp + 1)
+    assert 50 < device.value(actual.id) < 70
+    device.paused = True
+    changed = config.model_copy(deep=True)
+    changed.points[1].strategy.params["response_time"] = 2
+    edited = DeviceRuntime(changed, device)
+    assert edited.paused and edited.point_status(actual.id) == "paused"
+    before = edited.value(actual.id)
+    edited.tick(edited.stamp + 1)
+    assert edited.value(actual.id) == before
+    edited.paused = False
+    edited.set_raw(command.id, [0], "manual")
+    edited.tick(edited.stamp + 1)
+    assert 25 < edited.value(actual.id) < before

@@ -70,6 +70,7 @@ class BodyLimit:
 
 def create_app(data_dir=None, static_dir=None):
     runtime = Runtime()
+    batch_lock = asyncio.Lock()
     modbus = ModbusService(runtime)
     directory = Path(
         data_dir or os.environ.get("MODBUS_DATA_DIR", default_data_dir())
@@ -181,6 +182,8 @@ def create_app(data_dir=None, static_dir=None):
             raise DomainError("配置变更或关闭进行中，请稍后刷新", 409)
 
     def check_changes(new):
+        if batch_lock.locked():
+            raise DomainError("批量设备控制进行中，请稍后修改配置", 409)
         old = {d.id: d for d in storage().config.devices}
         incoming = {d.id: d for d in new.devices}
         for key, prior in old.items():
@@ -340,6 +343,55 @@ def create_app(data_dir=None, static_dir=None):
             return device_view(device)
         finally:
             context["controls"] -= 1
+
+    @app.post("/api/devices/actions/{action}")
+    async def batch_device_action(action: str, payload: dict):
+        if action not in ("start", "stop"):
+            raise DomainError("批量操作仅支持启动或停止", 404)
+        guard()
+        keys = payload.get("ids")
+        if (
+            not isinstance(keys, list)
+            or not 1 <= len(keys) <= 16
+            or any(not isinstance(key, str) or not 1 <= len(key) <= 64 for key in keys)
+            or len(set(keys)) != len(keys)
+        ):
+            raise DomainError("请选择 1～16 台设备，设备 ID 不能为空或重复")
+        if batch_lock.locked():
+            raise DomainError("另一批设备操作正在进行，请稍后重试", 409)
+        items = []
+        async with batch_lock:
+            for key in keys:
+                item = {"id": key, "name": key, "status": None}
+                try:
+                    guard()
+                    device = runtime.get(key)
+                    item.update(device_view(device))
+                    if device.status == ("running" if action == "start" else "stopped"):
+                        item.update(outcome="skipped", message="已处于目标状态")
+                    else:
+                        item.update(await device_action(key, action))
+                        item.update(
+                            outcome="success",
+                            message="已启动" if action == "start" else "已停止",
+                        )
+                except DomainError as exc:
+                    item.update(outcome="failed", message=exc.message, code=exc.status)
+                except Exception:
+                    logger.exception("批量设备操作失败：%s %s", action, key)
+                    item.update(
+                        outcome="failed", message="操作失败，请刷新状态核对", code=500
+                    )
+                if key in runtime.devices:
+                    item["status"] = runtime.get(key).status
+                items.append(item)
+        return {
+            "action": action,
+            "items": items,
+            "success": sum(item["outcome"] == "success" for item in items),
+            "skipped": sum(item["outcome"] == "skipped" for item in items),
+            "failed": sum(item["outcome"] == "failed" for item in items),
+        }
 
     @app.post("/api/devices/{key}/assign")
     async def assign(key: str, payload: dict):

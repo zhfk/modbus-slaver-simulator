@@ -1079,3 +1079,115 @@ tr.selected > td:first-child {
 .device-link:hover:not(:disabled) {
   border-left-color: var(--device-state, var(--muted));
 }
+
+.device-card {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+.device-selection {
+  margin: 0;
+  width: 18px;
+  height: 18px;
+}
+.device-batch-controls {
+  padding: 0 5px 8px;
+}
+.device-batch-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.device-batch-controls label span {
+  margin-left: auto;
+}
+.device-batch-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.device-batch-buttons button {
+  padding: 7px 5px;
+  min-width: 0;
+}
+
+.trend-plot {
+  position: relative;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  height: 180px;
+  margin-top: 12px;
+}
+.chart-y-axis {
+  position: relative;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+.chart-y-axis span {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-size: 16px;
+}
+.chart .signal {
+  vector-effect: non-scaling-stroke;
+}
+.sample-marker {
+  fill: var(--ink);
+}
+.chart-empty {
+  position: absolute;
+  left: 72px;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+  color: var(--secondary);
+}
+.chart-axis {
+  margin-left: calc(2.857% + 69.943px);
+  margin-right: calc(2.857% - 2.057px);
+}
+.chart-axis.single {
+  justify-content: center;
+}
+.chart-note {
+  margin: 8px 0 0;
+  color: var(--secondary);
+}
+.chart-crosshair {
+  pointer-events: none;
+}
+.chart-crosshair path {
+  stroke: var(--secondary);
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.chart-crosshair circle {
+  fill: var(--ink);
+  stroke: var(--surface);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+}
+.chart-tooltip {
+  position: absolute;
+  right: 8px;
+  top: 0;
+  max-width: calc(100% - 80px);
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 3px 12px #0002;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+.chart-tooltip span,
+.chart-tooltip strong {
+  display: block;
+}

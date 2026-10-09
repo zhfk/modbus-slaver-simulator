@@ -153,8 +153,10 @@ class Strategy(StrictModel):
                 raise ValueError("表达式常数非法")
         if self.kind in ("link", "alarm") and not self.dependencies:
             raise ValueError("联动策略需要依赖点位")
-        if self.kind == "thermal" and len(self.dependencies) != 2:
-            raise ValueError("温控策略需要启动命令和目标温度两个依赖")
+        if self.kind == "thermal" and (
+            len(self.dependencies) != 2 or len(set(self.dependencies)) != 2
+        ):
+            raise ValueError("温控策略需要两个不同依赖：启动命令、目标温度（按此顺序）")
         if self.kind in ("sequence", "replay"):
             rows = p.get("values", [])
             if not isinstance(rows, list) or not rows or len(rows) > 2000:
