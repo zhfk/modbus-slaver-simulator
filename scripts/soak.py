@@ -11,6 +11,7 @@ import json
 import platform
 import random
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -194,18 +195,19 @@ async def stage(seconds, points, clients, output, index):
             async def request(client, number):
                 at = time.monotonic()
                 # Read simulated data with an independent Modbus client.
-                response = await client.read_input_registers(0, count=1, device_id=1)
+                response = await client.read_input_registers(0, count=2, device_id=1)
                 if response.isError():
                     raise RuntimeError("Valid Modbus read rejected")
                 if number == 0:
-                    value = random.randrange(300, 900)
-                    response = await client.write_register(0, value, device_id=1)
+                    value = random.uniform(30, 90)
+                    words = list(struct.unpack(">HH", struct.pack(">f", value)))
+                    response = await client.write_registers(0, words, device_id=1)
                     if response.isError():
                         raise RuntimeError("Valid write rejected")
                     response = await client.read_holding_registers(
-                        0, count=1, device_id=1
+                        0, count=2, device_id=1
                     )
-                    if response.registers != [value]:
+                    if response.registers != words:
                         raise RuntimeError("Written value not retained")
                 latencies.append((time.monotonic() - at) * 1000)
                 if len(latencies) > 10000:

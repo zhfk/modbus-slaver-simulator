@@ -94,7 +94,8 @@ def test_api_state_and_validation(client):
     preview = client.post(
         f"/api/devices/{key}/preview-value", json={"id": point["id"], "value": 25.35}
     )
-    assert preview.json()["raw"] == [254]
+    assert preview.json()["raw"] == [0x41CA, 0xCCCD]
+    assert preview.json()["value"] == pytest.approx(25.35)
     response = client.post(
         f"/api/devices/{key}/assign", json={"items": [{"id": point["id"], "value": 80}]}
     )
@@ -598,8 +599,8 @@ def test_corrupt_history_preserves_file_and_does_not_block_autostart_or_config(
         try:
             assert protocol.connect()
             assert protocol.read_holding_registers(
-                0, count=1, device_id=1
-            ).registers == [600]
+                0, count=2, device_id=1
+            ).registers == [0x4270, 0]
         finally:
             protocol.close()
         config = http.get("/api/config").json()
@@ -804,3 +805,27 @@ def test_batch_rejects_overlap_and_configuration_changes_without_queueing(
         == 1
     )
     assert client.app.state.context["controls"] == 0
+
+
+def test_excel_blank_scale_and_precision_follow_type_defaults(tmp_path):
+    from openpyxl import load_workbook
+    from simulator.models import Point
+
+    device = thermal_template()
+    device.points.append(Point(name="integer", address=2))
+    path = tmp_path / "defaults.xlsx"
+    write_workbook(
+        {**Configuration(devices=[device]).model_dump(), "kind": "config"}, path
+    )
+    book = load_workbook(path)
+    sheet = book["点位"]
+    columns = {c.value: c.column for c in sheet[1]}
+    for row in range(2, sheet.max_row + 1):
+        sheet.cell(row, columns["倍率"]).value = None
+        sheet.cell(row, columns["显示精度"]).value = None
+    book.save(path)
+    result = parse_workbook(path, "update")
+    assert result["errors"] == []
+    points = result["config"]["devices"][0]["points"]
+    assert all(p["scale"] == 1 for p in points)
+    assert [p["precision"] for p in points] == [0, 2, 2, 0, 0]

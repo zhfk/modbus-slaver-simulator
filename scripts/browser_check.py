@@ -111,6 +111,22 @@ async def run(url, output):
         await expect(
             page.get_by_role("button", name="目标温度", exact=True)
         ).to_be_visible()
+        for target in (
+            page.get_by_role("button", name="目标温度", exact=True),
+            page.get_by_role("button", name="查看 目标温度 的实时趋势", exact=True),
+        ):
+            await target.hover()
+            await expect(target).to_have_css("color", "rgb(22, 104, 212)")
+            await target.focus()
+            await expect(target).to_have_css("color", "rgb(22, 104, 212)")
+        await page.get_by_role("heading", name="验收温控设备", exact=True).click()
+        await page.get_by_role(
+            "button", name="目标温度：查看／编辑", exact=True
+        ).click()
+        await expect(page.get_by_label("类型", exact=True)).to_have_value("Float32")
+        await expect(page.get_by_label("倍率", exact=True)).to_have_value("1")
+        await expect(page.get_by_label("显示小数位", exact=True)).to_have_value("2")
+        await page.keyboard.press("Escape")
         summary = page.get_by_label("设备状态汇总", exact=True)
         await expect(summary).to_contain_text("共 1 台")
         await expect(summary).to_contain_text("停止 1")
@@ -233,16 +249,13 @@ async def run(url, output):
             await page.get_by_role("heading", name="验收温控设备", exact=True).click()
             await expect(menu).to_have_count(0)
         await page.set_viewport_size({"width": 1440, "height": 1000})
-        await more.click()
-        await (
-            page.locator(".point-menu:popover-open")
-            .get_by_role("button", name="查看 / 编辑", exact=True)
-            .click()
-        )
+        edit = page.get_by_role("button", name="目标温度：查看／编辑", exact=True)
+        await expect(edit).to_be_visible()
+        await edit.click()
         await expect(page.get_by_role("dialog")).to_be_visible()
         await expect(page.locator(".point-menu:popover-open")).to_have_count(0)
         await page.keyboard.press("Escape")
-        await expect(more).to_be_focused()
+        await expect(edit).to_be_focused()
         # A drawer overlays the existing workspace without moving it or
         # removing the scrollbar's width. Only its own content can scroll.
         await page.set_viewport_size({"width": 1440, "height": 500})
@@ -319,9 +332,9 @@ async def run(url, output):
             await page.locator(".drawer-content").evaluate("el => el.scrollHeight")
             == preview_height
         )
-        await expect(page.get_by_text("实际值 75.3", exact=False)).to_be_visible()
+        await expect(page.get_by_text("实际值 75", exact=False)).to_be_visible()
         await page.get_by_role("button", name="应用当前值", exact=True).click()
-        await expect(row.locator(".live-value")).to_contain_text("75.30")
+        await expect(row.locator(".live-value strong")).to_have_text("75.30")
         await device_action("验收温控设备", "暂停策略")
         await expect(
             page.locator(".device-link").filter(has_text="验收温控设备")
@@ -419,13 +432,19 @@ async def run(url, output):
             await trigger.scroll_into_view_if_needed()
             height = (await page.locator(".monitor-panel").bounding_box())["height"]
             dedicated = page.get_by_role(
-                "button", name="目标温度设定：查看趋势", exact=True
+                "button", name="目标温度设定：查看／编辑", exact=True
             )
             await expect(dedicated).to_be_visible()
             assert not await dedicated.evaluate(
                 "button => Boolean(button.closest('.point-menu'))"
             )
-            await (dedicated if width == 1024 else trigger).click()
+            assert (
+                await page.get_by_role(
+                    "button", name="目标温度设定：查看趋势", exact=True
+                ).count()
+                == 0
+            )
+            await trigger.click()
             popup = page.locator("#point-trend-popover:popover-open")
             await expect(popup).to_be_visible()
             await expect(popup.locator(".chart")).to_have_count(1)
@@ -449,7 +468,7 @@ async def run(url, output):
                 chart_bounds["x"] + chart_bounds["width"] * 0.6, chart_bounds["y"] + 80
             )
             tooltip = popup.get_by_role("tooltip")
-            await expect(tooltip).to_contain_text("采样值：75.3")
+            await expect(tooltip).to_contain_text("采样值：75.30")
             tooltip_bounds = await tooltip.bounding_box()
             assert (
                 tooltip_bounds["x"] >= 0
@@ -457,7 +476,7 @@ async def run(url, output):
             )
             await chart_svg.focus()
             await page.keyboard.press("Home")
-            await expect(tooltip).to_contain_text("采样值：75.3")
+            await expect(tooltip).to_contain_text("采样值：75.30")
             await page.keyboard.press("End")
             await expect(popup.locator(".chart-crosshair")).to_be_visible()
             await page.screenshot(path=str(output / f"trend-tooltip-{width}.png"))
@@ -524,7 +543,7 @@ async def run(url, output):
             await page.screenshot(path=str(output / f"trend-popover-{width}.png"))
             await page.keyboard.press("Escape")
             await expect(popup).to_have_count(0)
-            await expect(dedicated if width == 1024 else trigger).to_be_focused()
+            await expect(trigger).to_be_focused()
             await page.screenshot(
                 path=str(output / f"width-{width}.png"), full_page=True
             )
@@ -542,6 +561,23 @@ async def run(url, output):
             page.locator(".device-link").filter(has_text="验收温控设备")
         ).to_contain_text("已停止")
         await page.get_by_role("button", name="新增点位", exact=True).click()
+        await expect(page.get_by_label("类型", exact=True)).to_have_value("UInt16")
+        await expect(page.get_by_label("倍率", exact=True)).to_have_value("1")
+        precision = page.get_by_label("显示小数位", exact=True)
+        await expect(precision).to_have_value("0")
+        await expect(precision).to_be_disabled()
+        for kind in ("Float32", "Float64"):
+            await page.get_by_label("类型", exact=True).select_option(kind)
+            await expect(precision).to_have_value("2")
+            await expect(precision).to_be_enabled()
+            await precision.fill("4")
+            await page.get_by_label("倍率", exact=True).fill("0.1")
+        await page.get_by_label("类型", exact=True).select_option("Int32")
+        await expect(precision).to_have_value("0")
+        await expect(precision).to_be_disabled()
+        await expect(page.get_by_label("倍率", exact=True)).to_have_value("1")
+        await page.get_by_label("类型", exact=True).select_option("Float32")
+        await precision.fill("4")
         await page.get_by_label("名称", exact=True).fill("随机测试点")
         await page.get_by_label("策略类型", exact=True).select_option("random")
         await page.get_by_role("button", name="保存配置", exact=True).click()
@@ -549,6 +585,7 @@ async def run(url, output):
             page.get_by_role("button", name="随机测试点", exact=True)
         ).to_be_visible()
         await page.get_by_role("button", name="随机测试点", exact=True).click()
+        await expect(page.get_by_label("显示小数位", exact=True)).to_have_value("4")
         await page.get_by_label("策略类型", exact=True).select_option("noise")
         await page.get_by_text("附加策略参数（JSON）", exact=True).click()
         await page.get_by_label("附加策略参数", exact=True).fill(
@@ -1228,7 +1265,9 @@ async def run(url, output):
             "batch start/stop targets only selected devices, partial bind failure continues, skipped states and confirmation cancellation",
             "batch pending disables selection/repeated submission; persistent per-device results, phone bounds and focus return",
             "device status colors and live counts, including real TCP bind failure and fault-device deletion",
-            "dedicated trend action, pointer and keyboard dragging clamped to viewport, position retained during refresh",
+            "direct view/edit action restores focus, trend opens from current value only, dragging stays in viewport and retains position",
+            "clickable point name/value hover and keyboard focus turn blue, template temperatures are Float32 with scale 1 and precision 2",
+            "integer display and precision fixed to 0, new scale 1, floating defaults 2 and custom precision retained, type switches reset defaults",
             "seven desktop time ticks and three mobile ticks with Chinese protocol address and function/identity descriptions",
             "actual read-only storage directory at 1440/1024/390 widths",
             "right drawer preserves workspace width and scroll, locks background and restores focus",

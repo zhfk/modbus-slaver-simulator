@@ -1,0 +1,54 @@
+{
+  "checked_at": "2026-10-09 23:05",
+  "timezone": "Asia/Shanghai",
+  "base_commit": "262cfef",
+  "scope": "source-only main; Float32 temperature defaults, strict integer display and point interactions",
+  "backend": {
+    "passed": 200,
+    "seconds": 53.13,
+    "warnings": 1
+  },
+  "frontend": {
+    "chart_tests_passed": 5,
+    "typecheck_build_passed": true,
+    "format_passed": true
+  },
+  "python_style": {
+    "format_passed": true,
+    "unused_imports_passed": true
+  },
+  "browser": {
+    "passed": true,
+    "checks": 49,
+    "page_errors": [],
+    "report": "artifacts/type-display-browser-final/browser.json"
+  },
+  "wheel": {
+    "installed_outside_checkout": true,
+    "passed": true,
+    "real_float32_two_registers": true,
+    "value": 75.25,
+    "raw": [
+      17046,
+      32768
+    ]
+  },
+  "soak": {
+    "status": "passed",
+    "completed_seconds": 140.628,
+    "requests": 8316,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "160bb86f0e38989078c0dde62ad3d420a30cadf61e6e4d23f58c03754377c869",
+    "p99_ms": 22.79524301411584,
+    "failures": []
+  },
+  "release_published": false,
+  "remaining": [
+    "24/72 hour endurance",
+    "native rebuilds for new source features",
+    "target user desktop systems",
+    "actual LAN and firewall environment"
+  ]
+}

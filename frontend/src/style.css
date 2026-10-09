@@ -13,6 +13,7 @@
   --accent: #f0b90b;
   --running: #16803c;
   --fault: #d32f2f;
+  --interactive: #1668d4;
 }
 * {
   box-sizing: border-box;
@@ -610,6 +611,16 @@ tr.selected > td:first-child {
 .small {
   min-height: 34px;
   padding: 4px 8px;
+}
+.point-name:hover,
+.point-name:focus-visible,
+.current-value:hover,
+.current-value:focus-visible,
+.state-button:hover:not(:disabled),
+.state-button:focus-visible {
+  color: var(--interactive);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .table-footer {
   padding: 14px 16px;

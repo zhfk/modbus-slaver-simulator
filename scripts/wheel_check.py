@@ -42,12 +42,16 @@ def run(target):
             client = ModbusTcpClient("127.0.0.1", port=port, timeout=2)
             try:
                 assert client.connect()
-                assert not client.write_register(0, 753, device_id=1).isError()
-                assert client.read_holding_registers(
-                    0, count=1, device_id=1
-                ).registers == [753]
+                words = [0x4296, 0x8000]  # Float32 75.25, big byte/word order.
+                assert not client.write_registers(0, words, device_id=1).isError()
+                assert (
+                    client.read_holding_registers(0, count=2, device_id=1).registers
+                    == words
+                )
                 rows = http.get(f"/api/devices/{key}/points").json()["items"]
-                assert rows[1]["value"] == 75.3 and rows[1]["raw"] == [753]
+                assert rows[1]["value"] == 75.25 and rows[1]["raw"] == words
+                assert rows[1]["type"] == "Float32"
+                assert rows[1]["scale"] == 1 and rows[1]["precision"] == 2
             finally:
                 client.close()
             assert http.post(f"/api/devices/{key}/actions/stop").status_code == 200

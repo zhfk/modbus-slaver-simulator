@@ -448,3 +448,50 @@ def test_thermal_uses_custom_dependencies_in_role_order_and_preserves_device_pau
     edited.set_raw(command.id, [0], "manual")
     edited.tick(edited.stamp + 1)
     assert 25 < edited.value(actual.id) < before
+
+
+@pytest.mark.parametrize(
+    "kind", ["Bool", "Int16", "UInt16", "Int32", "UInt32", "Float32", "Float64"]
+)
+def test_point_type_defaults_and_legacy_integer_precision(kind):
+    fields = {
+        "name": "point",
+        "type": kind,
+        "area": "coil" if kind == "Bool" else "holding",
+    }
+    point = Point(**fields)
+    assert point.scale == 1
+    assert point.precision == (2 if kind.startswith("Float") else 0)
+    explicit = Point(**fields, precision=4)
+    assert explicit.precision == (4 if kind.startswith("Float") else 0)
+
+
+def test_legacy_integer_scale_and_protocol_value_preserved_with_zero_precision():
+    point = Point.model_validate(
+        {
+            "name": "legacy",
+            "type": "UInt16",
+            "scale": 0.1,
+            "precision": 2,
+            "initial": 48.6,
+        }
+    )
+    assert point.precision == 0 and point.scale == 0.1
+    assert encode(point, point.initial) == [486]
+    assert decode(point, [486]) == pytest.approx(48.6)
+    assert Point.model_validate(point.model_dump()).model_dump() == point.model_dump()
+
+
+def test_thermal_temperature_defaults_are_float32_with_unit_scale():
+    config = thermal_template()
+    temperatures = config.points[1:3]
+    assert all(
+        p.type == "Float32" and p.scale == 1 and p.precision == 2 for p in temperatures
+    )
+    assert [encode(p, p.initial) for p in temperatures] == [[0x4270, 0], [0x41C8, 0]]
+    assert config.points[0].type == "Bool" and config.points[3].type == "Bool"
+
+
+def test_invalid_type_still_returns_validation_error_with_dynamic_precision():
+    with pytest.raises(ValidationError):
+        Point(name="bad", type="unknown")

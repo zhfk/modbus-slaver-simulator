@@ -431,7 +431,14 @@ function clock(value: number) {
 function formatValue(p: Row) {
   if (p.quality === "non_finite") return "非有限值";
   if (p.type === "Bool") return p.value ? "开" : "关";
-  return p.value == null ? "—" : Number(p.value).toFixed(p.precision ?? 2);
+  return p.value == null
+    ? "—"
+    : Number(p.value).toFixed(
+        ["Float32", "Float64"].includes(p.type) ? (p.precision ?? 2) : 0,
+      );
+}
+function defaultPrecision(type: string) {
+  return ["Float32", "Float64"].includes(type) ? 2 : 0;
 }
 function bytes(value: number) {
   return value ? `${(value / 1048576).toFixed(1)} MiB` : "0 MiB";
@@ -1067,7 +1074,7 @@ function defaultPoint(): Row {
     scale: 1,
     offset: 0,
     unit: "",
-    precision: 2,
+    precision: 0,
     initial: 0,
     writable: false,
     write_mode: "hold",
@@ -1118,6 +1125,7 @@ async function editPoint(row?: Row) {
 function changeArea() {
   const bit = ["coil", "discrete"].includes(draft.value.area);
   draft.value.type = bit ? "Bool" : "UInt16";
+  changePointType();
   if (bit) {
     draft.value.scale = 1;
     draft.value.offset = 0;
@@ -1125,6 +1133,10 @@ function changeArea() {
   }
   if (["discrete", "input"].includes(draft.value.area))
     draft.value.writable = false;
+}
+function changePointType() {
+  draft.value.precision = defaultPrecision(draft.value.type);
+  draft.value.scale = 1;
 }
 function changeStrategy() {
   draft.value.strategy.params = {};
@@ -1989,12 +2001,12 @@ onUnmounted(() => {
                   <td class="point-operations">
                     <button class="small" @click="openAssign([p])">赋值</button>
                     <button
-                      :id="`point-trend-${p.id}`"
+                      :id="`point-edit-${p.id}`"
                       class="small"
-                      :aria-label="`${p.name}：查看趋势`"
-                      @click="viewTrend(p, $event)"
+                      :aria-label="`${p.name}：查看／编辑`"
+                      @click="editPoint(p)"
                     >
-                      查看趋势
+                      查看／编辑
                     </button>
                     <button
                       :id="`point-more-${p.id}`"
@@ -2013,8 +2025,7 @@ onUnmounted(() => {
                       @toggle="positionRowMenu($event, p.id)"
                       @click="closeRowMenus(true)"
                     >
-                      <button @click="editPoint(p)">查看 / 编辑</button
-                      ><button
+                      <button
                         @click="setInitial(p)"
                         :disabled="p.value == null"
                       >
@@ -2129,7 +2140,12 @@ onUnmounted(() => {
                 >
                   <title>
                     {{ new Date(point.time * 1000).toLocaleString() }} ·
-                    {{ point.value }}
+                    {{
+                      formatValue({
+                        ...deviceConfig.points.find((p: Row) => p.id === key),
+                        value: point.value,
+                      })
+                    }}
                   </title>
                 </circle>
               </svg>
@@ -2143,7 +2159,12 @@ onUnmounted(() => {
                   new Date(trendHover.time * 1000).toLocaleString()
                 }}</span>
                 <strong
-                  >采样值：{{ trendHover.value }}
+                  >采样值：{{
+                    formatValue({
+                      ...deviceConfig.points.find((p: Row) => p.id === key),
+                      value: trendHover.value,
+                    })
+                  }}
                   {{
                     deviceConfig.points.find((p: Row) => p.id === key)?.unit
                   }}</strong
@@ -2530,7 +2551,11 @@ onUnmounted(() => {
                   </option>
                 </select></label
               ><label
-                >类型<select aria-label="类型" v-model="draft.type">
+                >类型<select
+                  aria-label="类型"
+                  v-model="draft.type"
+                  @change="changePointType"
+                >
                   <option
                     v-for="kind in ['coil', 'discrete'].includes(draft.area)
                       ? ['Bool']
@@ -2582,6 +2607,7 @@ onUnmounted(() => {
                 >显示小数位<input
                   type="number"
                   v-model.number="draft.precision"
+                  :disabled="!['Float32', 'Float64'].includes(draft.type)"
                   min="0"
                   max="10" /></label
               ><label

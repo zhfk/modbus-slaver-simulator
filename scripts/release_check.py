@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import struct
 import subprocess
 import tempfile
 import time
@@ -110,21 +111,29 @@ def check(binary, output):
                 try:
                     assert client.connect()
                     for unit, key in zip((1, 2, 3), keys):
-                        value = 600 + unit
-                        assert not client.write_register(
-                            0, value, device_id=unit
+                        value = 60.25 + unit
+                        words = list(struct.unpack(">HH", struct.pack(">f", value)))
+                        assert not client.write_registers(
+                            0, words, device_id=unit
                         ).isError()
-                        assert client.read_holding_registers(
-                            0, count=1, device_id=unit
-                        ).registers == [value]
+                        assert (
+                            client.read_holding_registers(
+                                0, count=2, device_id=unit
+                            ).registers
+                            == words
+                        )
                         rows = http.get(f"/api/devices/{key}/points").json()["items"]
-                        assert rows[1]["raw"] == [value]
-                        assert abs(rows[1]["value"] - value * 0.1) < 1e-8
+                        assert rows[1]["raw"] == words
+                        assert rows[1]["value"] == value
+                        assert rows[1]["type"] == "Float32"
+                        assert rows[1]["scale"] == 1 and rows[1]["precision"] == 2
                     http.post(f"/api/devices/{keys[0]}/actions/stop").raise_for_status()
                     for unit in (2, 3):
                         assert client.read_holding_registers(
-                            0, count=1, device_id=unit
-                        ).registers == [600 + unit]
+                            0, count=2, device_id=unit
+                        ).registers == list(
+                            struct.unpack(">HH", struct.pack(">f", 60.25 + unit))
+                        )
                 finally:
                     client.close()
                 checks.append(

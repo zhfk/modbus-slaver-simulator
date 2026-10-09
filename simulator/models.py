@@ -196,7 +196,14 @@ class Point(StrictModel):
     scale: float = 1
     offset: float = 0
     unit: str = Field(default="", max_length=32)
-    precision: int = Field(default=2, ge=0, le=10)
+    precision: int = Field(
+        default_factory=lambda data: (
+            2 if data.get("type") in ("Float32", "Float64") else 0
+        ),
+        ge=0,
+        le=10,
+        description="整数默认 0 位小数，浮点数默认 2 位小数",
+    )
     initial: float | bool = 0
     writable: bool = False
     strategy: Strategy = Field(default_factory=Strategy)
@@ -206,6 +213,8 @@ class Point(StrictModel):
 
     @model_validator(mode="after")
     def validate_point(self):
+        if self.type not in ("Float32", "Float64"):
+            self.precision = 0
         if self.scale == 0:
             raise ValueError("倍率不能为零")
         if (self.area in ("coil", "discrete")) != (self.type == "Bool"):
@@ -440,18 +449,18 @@ def thermal_template(name="温控设备", host="127.0.0.1", port=1502, unit_id=1
     )
     target = Point(
         name="目标温度",
+        type="Float32",
         address=0,
         initial=60,
-        scale=0.1,
         unit="℃",
         writable=True,
         write_mode="control",
     )
     actual = Point(
         name="实际温度",
+        type="Float32",
         area="input",
         initial=25,
-        scale=0.1,
         unit="℃",
         strategy=Strategy(
             kind="thermal",
