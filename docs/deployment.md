@@ -14,9 +14,9 @@
 依赖需要下载时使用运行环境已配置的网络及证书设置。离线部署在同平台、同 Python 版本的联网机器准备依赖：
 
 ```bash
-python -m pip download --constraint requirements.lock.txt --dest wheelhouse ./modbus_slaver_simulator-0.1.0-py3-none-any.whl
+python -m pip download --constraint requirements.lock.txt --dest wheelhouse ./modbus_slaver_simulator-0.2.0rc5-py3-none-any.whl
 # 将 wheelhouse 一并复制到目标机器
-python -m pip install --no-index --find-links wheelhouse --constraint requirements.lock.txt ./modbus_slaver_simulator-0.1.0-py3-none-any.whl
+python -m pip install --no-index --find-links wheelhouse --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc5-py3-none-any.whl
 ```
 
 以上约束不会安装全部开发工具，仅锁定应用实际需要的依赖。不同平台的二进制依赖不能直接混用。

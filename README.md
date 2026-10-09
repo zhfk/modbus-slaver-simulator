@@ -2,45 +2,139 @@
 
 Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Modbus TCP 运行时。前端编译为静态文件，启动一个后端即可使用。所有设备共用一个应用实例；无需独立前端服务器、Redis 或外部数据库。
 
-## 独立下载包（无需安装依赖）
-
-GitHub [v0.2.0rc5 下载](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5) 提供已通过原生检查的目录包：Linux x86_64、Windows x64、macOS Apple Silicon。完整解压后，Windows 双击 `start.cmd`，Linux 运行 `./start.sh`，macOS 运行 `./start.command`。包内包含 Python、应用依赖、前端页面和离线字体，用户不需要安装 Python 或 Node.js。启动后打开 `http://127.0.0.1:8000`。
-
 支持分别创建“从机 1#、2#、3#…”：共用 IP／端口时使用不同 Unit ID，或分别使用不同端口；点位、策略和值互相独立，停止一台不影响其他设备。默认最多 16 台设备、8 个端点、10000 个点位。
 
-兼容基线、启动、服务注册与升级见 [独立包说明](docs/standalone.md)。当前是 `0.2.0rc5` 功能预发布；各平台包须原生验证后才上传，长期运行验收未通过。下列安装流程保留给源码开发者和 wheel 部署。
+| 启动方式 | 适用场景 | 所需环境 |
+| --- | --- | --- |
+| [Release 包启动](#release-包启动推荐) | 下载解压后直接使用 | 无需安装 Python、Node.js 或数据库服务 |
+| [源码启动](#源码启动) | 修改代码、本地开发和自行构建 | Python 3.12、Node.js 22.12+、Git |
+| [wheel 部署](#wheel-部署需-python与升级) | 已有 Python 环境，自行分发安装包 | Python 3.12 和对应平台依赖 |
 
-## 安装和启动
+当前版本为 `0.2.0rc5` 功能预发布。三个发布目标已完成原生检查，长期运行验收尚未通过；详细证据见 [验收记录](docs/acceptance.md)。
 
-需要 Python 3.12+、Node.js 22.12+（仅构建前端时需要）以及 Git。先获取源码：
+## Release 包启动（推荐）
+
+在 [v0.2.0rc5 下载页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5) 的 **Assets** 中选择对应平台包。包内包含 Python、应用依赖、前端页面和离线字体；不要下载 `Source code` 代替独立运行包。完整解压并保留 `_internal/` 目录，不能只复制可执行文件。
+
+| 平台 | 下载文件 | 兼容与验证范围 |
+| --- | --- | --- |
+| Linux x86_64 | [modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc5/modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz) | Ubuntu 22.04 原生验证，glibc 2.35+；不支持 Alpine/musl |
+| Windows x64 | [modbus-simulator-0.2.0rc5-windows-x86_64.zip](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc5/modbus-simulator-0.2.0rc5-windows-x86_64.zip) | Windows Server 2022 原生验证，目标 Windows 10／11 尚须实机验收 |
+| macOS Apple Silicon | [modbus-simulator-0.2.0rc5-macos-arm64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc5/modbus-simulator-0.2.0rc5-macos-arm64.tar.gz) | macOS 15 原生验证，更老系统未验证；不提供 Intel 版本 |
+
+下载页的 `SHA256SUMS.txt` 可用于核对文件完整性。
+
+### Linux
+
+在下载文件所在目录执行：
+
+```bash
+tar -xzf modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz
+cd modbus-simulator-0.2.0rc5-linux-x86_64
+./start.sh
+```
+
+### Windows
+
+解压 zip，进入包目录双击 `start.cmd`。也可在下载目录打开 PowerShell 执行：
+
+```powershell
+Expand-Archive -Path .\modbus-simulator-0.2.0rc5-windows-x86_64.zip -DestinationPath .
+Set-Location .\modbus-simulator-0.2.0rc5-windows-x86_64
+.\start.cmd
+```
+
+### macOS Apple Silicon
+
+在下载文件所在目录执行：
+
+```bash
+tar -xzf modbus-simulator-0.2.0rc5-macos-arm64.tar.gz
+cd modbus-simulator-0.2.0rc5-macos-arm64
+./start.command
+```
+
+也可双击 `start.command`。包未做 Developer ID 签名／公证，首次运行若被系统拦截，确认下载来源后在“系统设置 → 隐私与安全性”中允许运行；无需关闭 Gatekeeper。
+
+### 自定义端口和数据目录
+
+独立包默认启动外部监督器，由它运行单个后端。以下命令替代上述启动命令，调整 Web 管理端口和数据目录：
+
+```bash
+# Linux / macOS，在解压后的包目录运行
+./modbus-simulator --port 8001 --data-dir "$HOME/modbus-data"
+```
+
+```powershell
+# Windows，在解压后的包目录运行
+.\modbus-simulator.exe --port 8001 --data-dir "$env:LOCALAPPDATA\ModbusSimulator"
+```
+
+使用自定义端口后访问 `http://127.0.0.1:8001`。`--version` 显示版本；常驻注册、离线维护和独立包升级见 [独立包说明](docs/standalone.md)。
+
+## 源码启动
+
+先安装 Python 3.12、Node.js 22.12+ 和 Git。Node.js 用于构建前端，构建完成后仅启动后端即可使用页面，不需要单独运行前端服务。获取源码：
 
 ```bash
 git clone https://github.com/zhfk/modbus-slaver-simulator.git
 cd modbus-slaver-simulator
 ```
 
-Linux／云开发环境：
+### Linux / macOS / 云开发环境
+
+确认 `python3 --version` 为 Python 3.12，`node --version` 至少为 22.12，然后在仓库根目录执行：
 
 ```bash
-./scripts/setup.sh
-.venv/bin/python -m simulator --data-dir .data
+bash scripts/setup.sh
+.venv/bin/python -m simulator.supervisor --port 8000
 ```
 
-Windows PowerShell：
+安装脚本创建 `.venv`、安装锁定依赖、构建前端并安装当前项目。启动命令使用外部监督器，数据默认写入系统用户目录。
+
+### Windows PowerShell
+
+在仓库根目录执行：
 
 ```powershell
 .\scripts\build.ps1
-.\.venv\Scripts\python.exe -m simulator --data-dir "$env:LOCALAPPDATA\ModbusSimulator"
+.\.venv\Scripts\python.exe -m simulator.supervisor --port 8000
 ```
 
-后端管理端口默认 8000，仅监听本机；本机浏览器地址为 `http://127.0.0.1:8000`。Modbus 端口按设备独立设置，默认 1502。需要外部 PLC／SCADA 接入时，将**设备**监听 IP 设置为实际网卡地址或 `0.0.0.0`，并允许对应端口的入站访问。管理服务仍只允许本机访问。绑定成功不代表操作系统防火墙或另一台电脑的网络路径已经配置完成。
+构建脚本创建 `.venv`、安装锁定依赖、构建前端及 wheel；上面的启动命令直接运行当前仓库的源码，不需要再安装 wheel。首次安装和构建需要下载依赖。
+
+### 开发调试
+
+需要直接运行后端时，用下面的命令替代监督启动，不要同时启动两份应用：
+
+```bash
+.venv/bin/python -m simulator --data-dir .data --port 8000
+```
+
+Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 8000`。修改前端源码后执行 `npm --prefix frontend run build`；修改后端源码后重启应用。可选 Vite 开发流程见 [开发与验证](#开发与验证)。
+
+## 启动后使用与多设备配置
+
+两种启动方式均在后端就绪后，通过本机浏览器访问 `http://127.0.0.1:8000`。首次没有设备，须创建并显式启动。终端按 Ctrl+C 停止服务；关闭浏览器不会停止服务。
+
+后端管理端口默认 8000，仅监听本机；Modbus 端口按设备独立设置，默认 1502。需要外部 PLC／SCADA 接入时，将**设备**监听 IP 设置为实际网卡地址或 `0.0.0.0`，并允许对应端口的入站访问。客户端连接运行模拟器电脑的实际 IP，不能把 `0.0.0.0` 作为目标地址。管理服务仍只允许本机访问。
 
 1. 点击“新建设备”，选择温控模板或空设备。
 2. 设置监听 IP、端口、Unit ID；配置点位或导入 Excel。
 3. 点击“启动设备”，再连接外部 Modbus TCP 客户端。
 4. 在点位表格中赋值、配置策略、查看趋势和真实通信记录。
 
-生产运行不要使用 `--reload` 或多个 Web worker。内存中的寄存器是协议、管理界面与策略的唯一数据来源。“暂停策略”保留通信；“停止设备”停止该设备通信。关闭浏览器不影响服务。
+多设备配置示例：
+
+| 设备名称 | 监听地址 | Unit ID |
+| --- | --- | --- |
+| 从机 1# | `0.0.0.0:1502` | 1 |
+| 从机 2# | `0.0.0.0:1502` | 2 |
+| 从机 3# | `0.0.0.0:1502` | 3 |
+
+外部主机通过 Unit ID 选择设备；同一 IP／端口不能重复 Unit ID。若主机软件不支持多个 Unit ID，可以分别使用 1502、1503、1504 端口，每台都用 Unit ID 1。
+
+不要使用 `--reload` 或多个 Web worker。内存中的寄存器是协议、管理界面与策略的唯一数据来源。“暂停策略”保留通信；“停止设备”停止该设备通信。
 
 ## 功能
 
@@ -76,7 +170,15 @@ PLC / SCADA ── Modbus TCP ────────┤ 单个 FastAPI / async
 
 ## 存储与恢复
 
-数据目录与代码、安装目录分开。默认 Windows 用户应用数据目录；Linux 使用 XDG 数据目录。云环境通过 `--data-dir .data` 保持在工作区。
+源码监督启动和 Release 包默认使用以下数据目录，与代码、安装目录分开：
+
+| 系统 | 默认数据目录 |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\ModbusSimulator` |
+| Linux | `$XDG_DATA_HOME/modbus-simulator`，未设置时为 `~/.local/share/modbus-simulator` |
+| macOS | `~/Library/Application Support/ModbusSimulator` |
+
+通过 `--data-dir` 设置本机可写目录；源码开发可使用 `--data-dir .data`。同一数据目录只能由一个应用实例使用。升级时保留数据目录，避免覆盖或删除已有配置。
 
 | 文件 | 作用 |
 | --- | --- |
@@ -93,13 +195,7 @@ PLC / SCADA ── Modbus TCP ────────┤ 单个 FastAPI / async
 
 可选历史库损坏时保留原文件并显示故障，可靠配置和 Modbus 服务仍可使用。配置提交成功后的额外备份失败单独报告，不把已生效的修改说成回滚；历史写入恢复不会抹去尚未恢复的快照或备份错误。历史批次同时限制条数与字节，并在预算压力下提前清理，适用于较小的存储预算。
 
-外部监督启动：
-
-```bash
-.venv/bin/python -m simulator.supervisor --data-dir .data --port 8000
-```
-
-监督器在应用进程之外检查实际业务进展，连续失败后终止／重启，10 分钟内最多重启 3 次。Windows 可运行 `scripts/install-startup-task.ps1` 注册登录启动任务；无人值守开机运行时，在任务计划程序配置合适的服务账户、启动触发器及数据目录权限。服务监控不能替代目标 Windows 机器上的实际验收。
+上述源码监督启动与 Release 包启动均在应用进程之外检查实际业务进展，连续失败后终止／重启，10 分钟内最多重启 3 次。源码 Windows 部署可运行 `scripts/install-startup-task.ps1`，独立包对应 `service/install-windows-task.ps1`，注册登录启动任务；无人值守开机运行时，在任务计划程序配置合适的服务账户、启动触发器及数据目录权限。Linux systemd、macOS launchd 和详细常驻配置见 [独立包说明](docs/standalone.md) 与 [部署与维护](docs/deployment.md)。
 
 正常停止后执行维护；活动实例锁会阻止同时修改数据文件：
 
@@ -110,7 +206,7 @@ PLC / SCADA ── Modbus TCP ────────┤ 单个 FastAPI / async
 
 恢复先验证完整性、数据库版本和配置内容，保留损坏数据库及 WAL 的副本到 `recovery/`；空配置备份也可恢复。不支持的版本在替换前拒绝。历史不默认备份；空间回收需要额外磁盘空间，不能在线反复 VACUUM。启动时检测不支持的数据库版本而不覆盖版本或自动清空数据。
 
-## 发布包部署与升级
+## wheel 部署（需 Python）与升级
 
 构建机器运行安装脚本后，再构建发布包；顺序不能颠倒，wheel 必须包含前端与字体：
 
