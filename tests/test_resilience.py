@@ -803,20 +803,34 @@ async def test_slow_read_client_times_out_without_blocking_healthy_client():
     rt.apply(Configuration(devices=[d]))
     svc = ModbusService(rt)
     await svc.start(d.id)
-    _, slow_writer = await asyncio.open_connection("127.0.0.1", d.port, limit=1024)
-    slow_writer.get_extra_info("socket").setsockopt(
-        socket.SOL_SOCKET, socket.SO_RCVBUF, 1024
-    )
+    # A StreamReader prefetches responses before pausing, and OS receive-window
+    # sizes differ. Use a real socket that never reads, configured before connect.
+    slow_socket = socket.socket()
+    slow_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
+    slow_socket.setblocking(False)
+    loop = asyncio.get_running_loop()
+    await loop.sock_connect(slow_socket, ("127.0.0.1", d.port))
     await asyncio.sleep(0.01)
     endpoint = next(iter(svc.endpoints.values()))
     accepted = next(iter(endpoint.clients))
     accepted.get_extra_info("socket").setsockopt(
         socket.SOL_SOCKET, socket.SO_SNDBUF, 4096
     )
+    accepted.transport.set_write_buffer_limits(high=4096, low=1024)
     reader, writer = await asyncio.open_connection("127.0.0.1", d.port)
+
+    async def send_requests():
+        # Bounded but sufficient to fill Windows as well as Unix socket buffers.
+        for _ in range(256):
+            await asyncio.wait_for(
+                loop.sock_sendall(
+                    slow_socket, bytes.fromhex("00010000000601030000007d") * 128
+                ),
+                2,
+            )
+
+    sender = asyncio.create_task(send_requests())
     try:
-        slow_writer.write(bytes.fromhex("00010000000601030000007d") * 1000)
-        await slow_writer.drain()
         writer.write(bytes.fromhex("000200000006010300000001"))
         await writer.drain()
         assert (await asyncio.wait_for(reader.readexactly(11), 0.5))[-2:] == b"\x00\x00"
@@ -826,7 +840,9 @@ async def test_slow_read_client_times_out_without_blocking_healthy_client():
         assert accepted not in endpoint.clients and not writer.transport.is_closing()
         await asyncio.wait_for(svc.stop(d.id), 1)
     finally:
-        slow_writer.close()
+        sender.cancel()
+        await asyncio.gather(sender, return_exceptions=True)
+        slow_socket.close()
         writer.close()
         await svc.close()
 

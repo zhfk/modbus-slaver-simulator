@@ -7,8 +7,8 @@ GitHub [Releases](https://github.com/zhfk/modbus-slaver-simulator/releases) 中�
 Linux：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc3-linux-x86_64.tar.gz
-cd modbus-simulator-0.2.0rc3-linux-x86_64
+tar -xzf modbus-simulator-0.2.0rc4-linux-x86_64.tar.gz
+cd modbus-simulator-0.2.0rc4-linux-x86_64
 ./start.sh
 ```
 
