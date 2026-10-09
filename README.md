@@ -8,7 +8,7 @@ GitHub [Releases](https://github.com/zhfk/modbus-slaver-simulator/releases) 提�
 
 支持分别创建“从机 1#、2#、3#…”：共用 IP／端口时使用不同 Unit ID，或分别使用不同端口；点位、策略和值互相独立，停止一台不影响其他设备。默认最多 16 台设备、8 个端点、10000 个点位。
 
-兼容基线、启动、服务注册与升级见 [独立包说明](docs/standalone.md)。当前是 `0.2.0rc1` 功能预发布；各平台包须原生验证后才上传，长期运行验收未通过。下列安装流程保留给源码开发者和 wheel 部署。
+兼容基线、启动、服务注册与升级见 [独立包说明](docs/standalone.md)。当前是 `0.2.0rc2` 功能预发布；各平台包须原生验证后才上传，长期运行验收未通过。下列安装流程保留给源码开发者和 wheel 部署。
 
 ## 安装和启动
 
@@ -120,13 +120,13 @@ npm --prefix frontend run build
 .venv/bin/python -m build --no-isolation
 ```
 
-Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc1-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
+Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc2-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
 
 Linux：在 wheel 与锁定文件所在目录运行：
 
 ```bash
 python3 -m venv "$HOME/modbus-simulator/venv"
-"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc1-py3-none-any.whl
+"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc2-py3-none-any.whl
 "$HOME/modbus-simulator/venv/bin/python" -m simulator.supervisor --data-dir "$HOME/.local/share/modbus-simulator" --port 8000
 ```
 
@@ -136,7 +136,7 @@ Windows PowerShell：在 wheel 与锁定文件所在目录运行：
 $AppDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulatorApp'
 $DataDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulator'
 py -3.12 -m venv "$AppDir\venv"
-& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc1-py3-none-any.whl
+& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc2-py3-none-any.whl
 & "$AppDir\venv\Scripts\python.exe" -m simulator.supervisor --data-dir $DataDir --port 8000
 ```
 

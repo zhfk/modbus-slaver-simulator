@@ -28,6 +28,9 @@ jobs:
             arch: arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,7 +58,7 @@ jobs:
       - name: Backend regression tests
         run: |
           python -m pip install -r requirements.lock.txt
-          python -m pytest -q
+          python scripts/ci_run.py python -m pytest -q
       - name: Compile frontend
         run: |
           npm --prefix frontend ci
@@ -66,10 +69,10 @@ jobs:
           python -m venv .release-venv
           if [ "$RUNNER_OS" = "Windows" ]; then
             .release-venv/Scripts/python.exe -m pip install -r requirements-release.txt
-            .release-venv/Scripts/python.exe scripts/build_release.py
+            python scripts/ci_run.py .release-venv/Scripts/python.exe scripts/build_release.py
           else
             .release-venv/bin/python -m pip install -r requirements-release.txt
-            .release-venv/bin/python scripts/build_release.py
+            python scripts/ci_run.py .release-venv/bin/python scripts/build_release.py
           fi
       - name: Validate unpacked release outside checkout
         shell: bash
@@ -86,7 +89,7 @@ jobs:
               else:
                   shutil.unpack_archive(archive, directory, filter='data')
               binary = target / ('modbus-simulator.exe' if sys.platform == 'win32' else 'modbus-simulator')
-              subprocess.run([sys.executable, 'scripts/release_check.py', '--binary', str(binary), '--output', 'dist/release/check.json'], check=True)
+              subprocess.run([sys.executable, 'scripts/ci_run.py', sys.executable, 'scripts/release_check.py', '--binary', str(binary), '--output', 'dist/release/check.json'], check=True)
           PY
       - name: Upload verified artifacts
         uses: actions/upload-artifact@v4

@@ -1,4 +1,4 @@
-# 独立预发布包 0.2.0rc1
+# 独立预发布包 0.2.0rc2
 
 解压即可运行，包含 Python 3.12、应用依赖、Vue 前端资源与离线字体。用户不需要安装 Python、Node.js、数据库服务器或另一个前端服务。默认启动进程外监督器和单个应用子进程。
 
@@ -6,10 +6,10 @@
 
 | 平台 | 下载文件 | 启动 |
 | --- | --- | --- |
-| Linux x86_64 | `modbus-simulator-0.2.0rc1-linux-x86_64.tar.gz` | 解压后执行 `./start.sh` |
-| Windows x64 | `modbus-simulator-0.2.0rc1-windows-x86_64.zip` | 解压后双击 `start.cmd` |
-| macOS Intel | `modbus-simulator-0.2.0rc1-macos-x86_64.tar.gz` | 解压后执行 `./start.command` |
-| macOS Apple Silicon | `modbus-simulator-0.2.0rc1-macos-arm64.tar.gz` | 解压后执行 `./start.command` |
+| Linux x86_64 | `modbus-simulator-0.2.0rc2-linux-x86_64.tar.gz` | 解压后执行 `./start.sh` |
+| Windows x64 | `modbus-simulator-0.2.0rc2-windows-x86_64.zip` | 解压后双击 `start.cmd` |
+| macOS Intel | `modbus-simulator-0.2.0rc2-macos-x86_64.tar.gz` | 解压后执行 `./start.command` |
+| macOS Apple Silicon | `modbus-simulator-0.2.0rc2-macos-arm64.tar.gz` | 解压后执行 `./start.command` |
 
 打开本机浏览器的 `http://127.0.0.1:8000`。使用 `modbus-simulator --port 8001 --data-dir <目录>` 调整端口和数据目录；Windows 可执行文件带 `.exe` 后缀。配置和快照默认存入系统用户数据目录，不写进安装包。
 
