@@ -12,3 +12,4 @@ artifacts/
 *.egg-info/
 build/
 dist/
+.idea
