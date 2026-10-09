@@ -377,15 +377,43 @@ pre {
 .row-menu {
   margin-left: 5px;
 }
-.row-menu summary {
-  padding: 6px 7px;
-  min-height: 34px;
+.point-menu,
+.trend-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: 250px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  padding: 8px;
+  border: 1px solid var(--ink);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
-.row-menu > div {
-  position: relative;
-  top: 0;
-  right: auto;
-  margin-top: 5px;
+.point-menu:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.point-menu button {
+  border-color: transparent;
+  text-align: left;
+  white-space: normal;
+  flex-shrink: 0;
+}
+.point-menu button:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.trend-popover {
+  width: 720px;
+  padding: 20px;
+  border-radius: 24px;
+}
+.current-value {
+  padding: 0;
+  min-height: 24px;
 }
 .batch-bar {
   display: flex;

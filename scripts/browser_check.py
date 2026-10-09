@@ -6,7 +6,7 @@ import json
 import os
 import shutil
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from playwright.async_api import async_playwright, expect
 
 
@@ -78,6 +78,40 @@ async def run(url, output):
         await expect(
             page.get_by_role("button", name="目标温度", exact=True)
         ).to_be_visible()
+        for width in (1440, 1024, 390):
+            await page.set_viewport_size({"width": width, "height": 844})
+            row = page.get_by_role("row").filter(
+                has=page.get_by_role("button", name="目标温度", exact=True)
+            )
+            more = row.get_by_role("button", name="更多点位操作", exact=True)
+            await more.scroll_into_view_if_needed()
+            before_height = (await row.bounding_box())["height"]
+            await more.click()
+            menu = page.locator(".point-menu:popover-open")
+            await expect(menu).to_be_visible()
+            await page.wait_for_timeout(100)
+            assert (await row.bounding_box())["height"] == before_height
+            bounds = await menu.bounding_box()
+            assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+            assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 844
+            await page.screenshot(path=str(output / f"row-menu-{width}.png"))
+            await page.keyboard.press("Escape")
+            await expect(menu).to_have_count(0)
+            await expect(more).to_be_focused()
+            await more.click()
+            await page.get_by_role("heading", name="验收温控设备", exact=True).click()
+            await expect(menu).to_have_count(0)
+        await page.set_viewport_size({"width": 1440, "height": 1000})
+        await more.click()
+        await (
+            page.locator(".point-menu:popover-open")
+            .get_by_role("button", name="查看 / 编辑", exact=True)
+            .click()
+        )
+        await expect(page.get_by_role("dialog")).to_be_visible()
+        await expect(page.locator(".point-menu:popover-open")).to_have_count(0)
+        await page.keyboard.press("Escape")
+        await expect(more).to_be_focused()
         # A drawer overlays the existing workspace without moving it or
         # removing the scrollbar's width. Only its own content can scroll.
         await page.set_viewport_size({"width": 1440, "height": 500})
@@ -150,15 +184,43 @@ async def run(url, output):
         await expect(
             page.get_by_role("button", name="目标温度设定", exact=True)
         ).to_be_focused()
-        await page.get_by_role("button", name="实时趋势", exact=True).click()
-        await expect(
-            page.get_by_role("heading", name="实时趋势", exact=True)
-        ).to_be_visible()
-        await page.wait_for_timeout(1500)
+        trend_queries = []
+        page.on(
+            "request",
+            lambda req: (
+                trend_queries.append(parse_qs(urlsplit(req.url).query).get("ids", []))
+                if "/trends?" in req.url
+                else None
+            ),
+        )
+        await page.get_by_label("选择当前页全部点位", exact=True).check()
         for width in (1440, 1024, 390):
             await page.set_viewport_size(
                 {"width": width, "height": 1000 if width > 500 else 844}
             )
+            trigger = page.get_by_role(
+                "button", name="查看 目标温度设定 的实时趋势", exact=True
+            )
+            await trigger.scroll_into_view_if_needed()
+            height = (await page.locator(".monitor-panel").bounding_box())["height"]
+            await trigger.click()
+            popup = page.locator("#point-trend-popover:popover-open")
+            await expect(popup).to_be_visible()
+            await expect(popup.locator(".chart")).to_have_count(1)
+            await expect(popup.locator(".chart strong")).to_have_text("目标温度设定")
+            assert (await page.locator(".monitor-panel").bounding_box())[
+                "height"
+            ] == height
+            await page.wait_for_timeout(1100)
+            bounds = await popup.bounding_box()
+            assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+            assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= (
+                1000 if width > 500 else 844
+            )
+            await page.screenshot(path=str(output / f"trend-popover-{width}.png"))
+            await page.keyboard.press("Escape")
+            await expect(popup).to_have_count(0)
+            await expect(trigger).to_be_focused()
             await page.screenshot(
                 path=str(output / f"width-{width}.png"), full_page=True
             )
@@ -166,7 +228,11 @@ async def run(url, output):
                 "document.documentElement.scrollWidth > innerWidth"
             )
             assert not overflow, f"Page overflow at {width}"
+        assert trend_queries and all(
+            len(ids) == 1 and "," not in ids[0] for ids in trend_queries
+        )
         await page.set_viewport_size({"width": 1440, "height": 1000})
+        await page.get_by_label("选择当前页全部点位", exact=True).uncheck()
         await page.get_by_role("button", name="停止设备", exact=True).click()
         await expect(
             page.get_by_role("button", name="启动设备", exact=True)
@@ -308,6 +374,104 @@ async def run(url, output):
         await dialog.get_by_label("绑定 IP", exact=True).fill("127.0.0.1")
         await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
         await expect(dialog).to_have_count(0)
+        await page.locator(".device-link").filter(has_text="验收温控设备").click()
+        await page.get_by_role("button", name="目标温度设定", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        strategy = dialog.get_by_label("策略类型", exact=True)
+        await expect(strategy).to_be_enabled()
+        await expect(dialog.get_by_label("写入后行为", exact=True)).to_have_value(
+            "control"
+        )
+        await strategy.select_option("sine")
+        await expect(dialog.get_by_label("写入后行为", exact=True)).to_have_value(
+            "hold"
+        )
+        await dialog.get_by_label("更新周期（秒）", exact=True).fill("0.1")
+        await dialog.get_by_label("幅度", exact=True).fill("5")
+        await dialog.get_by_label("周期（秒）", exact=True).fill("4")
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        await page.get_by_role("button", name="启动设备", exact=True).click()
+        await page.wait_for_timeout(500)
+        points = await (
+            await page.request.get(
+                url
+                + "/api/devices/"
+                + (await (await page.request.get(url + "/api/config")).json())[
+                    "devices"
+                ][0]["id"]
+                + "/points"
+            )
+        ).json()
+        target = next(p for p in points["items"] if p["name"] == "目标温度设定")
+        assert target["strategy"]["kind"] == "sine" and target["state"] == "running"
+        assert 45 <= target["value"] <= 55
+        await page.get_by_role("button", name="目标温度设定", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        await dialog.get_by_text("附加策略参数（JSON）", exact=True).click()
+        await dialog.get_by_label("附加策略参数", exact=True).fill(
+            '{"base":"fixed","value":25}'
+        )
+        await dialog.get_by_label("写入后行为", exact=True).select_option("control")
+        await expect(dialog.get_by_label("策略类型", exact=True)).to_have_value("none")
+        await expect(dialog.get_by_label("策略类型", exact=True)).to_be_enabled()
+        await expect(dialog.get_by_label("附加策略参数", exact=True)).to_have_value(
+            "{}"
+        )
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        for kind in ("sequence", "replay"):
+            await page.get_by_role("button", name="目标温度设定", exact=True).click()
+            dialog = page.get_by_role("dialog")
+            await dialog.get_by_label("策略类型", exact=True).select_option(kind)
+            await dialog.get_by_role("button", name="保存配置", exact=True).click()
+            await expect(dialog).to_have_count(0)
+        await page.get_by_role("button", name="目标温度设定", exact=True).click()
+        await page.get_by_label("写入后行为", exact=True).select_option("control")
+        await page.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        await page.get_by_role("button", name="启动命令", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        strategy = dialog.get_by_label("策略类型", exact=True)
+        await expect(strategy).to_be_enabled()
+        assert await strategy.locator("option[value='random']").count() == 0
+        assert await strategy.locator("option[value='sine']").count() == 0
+        await strategy.select_option("fixed")
+        await dialog.get_by_label("固定值", exact=True).select_option("1")
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        await page.get_by_role("button", name="启动命令", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        await dialog.get_by_label("策略类型", exact=True).select_option("sequence")
+        await dialog.get_by_label("更新周期（秒）", exact=True).fill("0.1")
+        samples = dialog.get_by_role("textbox", name="样本", exact=False)
+        await samples.fill("[[0.3,0],[0.3,2]]")
+        before = await (await page.request.get(url + "/api/config")).json()
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog.locator(".message.error")).to_contain_text(
+            "样本值只能为 0／1"
+        )
+        assert await (await page.request.get(url + "/api/config")).json() == before
+        await samples.fill("[[0.3,0],[0.3,1]]")
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        key = before["devices"][0]["id"]
+        seen = set()
+        for _ in range(12):
+            response = await (
+                await page.request.get(url + f"/api/devices/{key}/points")
+            ).json()
+            command = next(p for p in response["items"] if p["name"] == "启动命令")
+            assert isinstance(command["value"], bool) and not command["error"]
+            seen.add(command["value"])
+            if len(seen) == 2:
+                break
+            await page.wait_for_timeout(150)
+        assert seen == {False, True}, seen
+        await page.get_by_role("button", name="启动命令", exact=True).click()
+        await page.get_by_label("写入后行为", exact=True).select_option("control")
+        await page.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
         assert not failures, failures
         await browser.close()
     report = {
@@ -316,6 +480,12 @@ async def run(url, output):
             "actual read-only storage directory at 1440/1024/390 widths",
             "right drawer preserves workspace width and scroll, locks background and restores focus",
             "device creation",
+            "row menu overlays without changing row height at 1440/1024/390, stays in viewport, dismisses and restores focus",
+            "control input can select and save a generated strategy, then runs it",
+            "returning to control input clears strategy and extra parameters",
+            "sequence and replay switches initialize valid samples",
+            "Bool strategy choices and on/off fixed values, invalid sample retention, actual 0/1 sequence updates",
+            "single-point trend popover at 1440/1024/390 preserves list height and ignores bulk selection",
             "template and empty creation reject duplicate endpoint/unit and retain drafts",
             "distinct unit shares endpoint; editing rejects duplicates and excludes itself",
             "wildcard/specific address overlap rejected in both creation modes and editing",

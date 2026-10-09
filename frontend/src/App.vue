@@ -63,6 +63,7 @@ const addTemplate = ref(true),
   newPort = ref(1502),
   newUnit = ref(1);
 const deviceMemory = new Map<string, Row>();
+let trendAnchor: HTMLElement | null = null;
 let scrollLock: { overflow: string; paddingRight: string } | null = null;
 function lockBackground(locked: boolean) {
   const body = document.body;
@@ -133,6 +134,22 @@ const strategyNames: Row = {
   thermal: "温控联动",
   alarm: "回差报警",
 };
+const booleanStrategies = [
+  "none",
+  "fixed",
+  "sequence",
+  "replay",
+  "expression",
+  "alarm",
+];
+const availableStrategies = computed(() =>
+  Object.fromEntries(
+    Object.entries(strategyNames).filter(
+      ([kind]) =>
+        draft.value.type !== "Bool" || booleanStrategies.includes(kind),
+    ),
+  ),
+);
 const modeNames: Row = {
   hold: "保持写入值",
   temporary: "临时覆盖",
@@ -379,7 +396,11 @@ async function poll() {
         const key = deviceId.value;
         const ids = trendKeys.value.join(",");
         const data = await request(`/api/devices/${key}/trends?ids=${ids}`);
-        if (key === deviceId.value && ids === trendKeys.value.join(","))
+        if (
+          showTrend.value &&
+          key === deviceId.value &&
+          ids === trendKeys.value.join(",")
+        )
           trendData.value = data;
       }
     }
@@ -401,6 +422,7 @@ async function selectDevice(key: string) {
   showNav.value = false;
 }
 watch(deviceId, async (key, previous) => {
+  closeTrend();
   if (deviceMemory.size >= 16)
     deviceMemory.delete(deviceMemory.keys().next().value!);
   if (previous)
@@ -448,6 +470,7 @@ watch(page, () => {
   loadPoints().catch((e) => (error.value = e.message));
 });
 watch(onlyErrors, () => poll());
+watch(tab, () => closeTrend());
 function toggleAll() {
   selected.value = allSelected.value ? [] : visibleIds.value.slice();
 }
@@ -456,8 +479,48 @@ function toggleRow(id: string) {
     ? selected.value.filter((k) => k !== id)
     : [...selected.value, id];
 }
+function closeRowMenus(returnFocus = false) {
+  for (const menu of document.querySelectorAll<HTMLElement>(
+    ".point-menu:popover-open",
+  )) {
+    menu.hidePopover();
+    if (returnFocus)
+      document
+        .getElementById(menu.id.replace("point-menu-", "point-more-"))
+        ?.focus({ preventScroll: true });
+  }
+}
+function positionRowMenu(event: Event, id: string) {
+  if ((event as ToggleEvent).newState !== "open") return;
+  const menu = event.target as HTMLElement;
+  const trigger = document.getElementById(`point-more-${id}`);
+  if (!trigger) return;
+  placePopover(menu, trigger);
+}
+function placePopover(menu: HTMLElement, trigger: HTMLElement) {
+  const anchor = trigger.getBoundingClientRect(),
+    popup = menu.getBoundingClientRect();
+  const below = anchor.bottom + 6;
+  const top =
+    below + popup.height <= innerHeight - 8
+      ? below
+      : anchor.top - popup.height - 6;
+  menu.style.left = `${Math.max(8, Math.min(anchor.right - popup.width, innerWidth - popup.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(top, innerHeight - popup.height - 8))}px`;
+}
+function dismissRowMenus(event: Event) {
+  if (
+    event.target instanceof Element &&
+    event.target.closest(".point-menu, .trend-popover")
+  )
+    return;
+  closeRowMenus();
+  closeTrend();
+}
 async function openModal(kind: string) {
   if (!(await closeModal())) return false;
+  closeTrend();
+  closeRowMenus(true);
   focusReturn = document.activeElement as HTMLElement;
   modal.value = kind;
   draftError.value = "";
@@ -696,6 +759,10 @@ async function editPoint(row?: Row) {
       ? deviceConfig.value.points.find((p: Row) => p.id === row.id)
       : defaultPoint(),
   );
+  if (draft.value.type === "Bool" && draft.value.strategy.kind === "fixed")
+    draft.value.strategy.params.value = Number(
+      draft.value.strategy.params.value ?? draft.value.initial,
+    );
   const fields = strategyFields(draft.value.strategy.kind);
   paramText.value = JSON.stringify(
     Object.fromEntries(
@@ -733,15 +800,50 @@ function changeStrategy() {
     draft.value.strategy.params[key] = value;
   draft.value.strategy.dependencies = [];
   paramText.value = "{}";
+  if (["ramp", "sequence", "replay"].includes(draft.value.strategy.kind))
+    draft.value.strategy.params.loop = true;
+  if (["sequence", "replay"].includes(draft.value.strategy.kind))
+    sampleText.value = JSON.stringify(
+      draft.value.strategy.kind === "sequence"
+        ? [
+            [5, 0],
+            [5, 1],
+          ]
+        : [
+            [0, 0],
+            [10, 1],
+          ],
+      null,
+      2,
+    );
   if (
     draft.value.strategy.kind !== "none" &&
     draft.value.write_mode === "control"
   )
     draft.value.write_mode = "hold";
 }
+function changeWriteMode() {
+  if (draft.value.write_mode !== "control") return;
+  draft.value.strategy = {
+    kind: "none",
+    enabled: true,
+    interval: 1,
+    seed: 1,
+    params: {},
+    dependencies: [],
+  };
+  paramText.value = "{}";
+}
 async function savePoint() {
   await action(async () => {
     const point = clone(draft.value);
+    if (
+      point.type === "Bool" &&
+      !booleanStrategies.includes(point.strategy.kind)
+    )
+      throw new Error(
+        "该策略不适用于 Bool，请选择固定值、状态序列、回放、表达式或回差报警",
+      );
     if (["sequence", "replay"].includes(point.strategy.kind))
       point.strategy.params.values = JSON.parse(sampleText.value);
     const extra = JSON.parse(paramText.value);
@@ -759,6 +861,23 @@ async function savePoint() {
         ),
       ),
     };
+    if (point.type === "Bool") {
+      const valid = (value: unknown) =>
+        value === 0 || value === 1 || value === false || value === true;
+      if (
+        point.strategy.kind === "fixed" &&
+        !valid(point.strategy.params.value)
+      )
+        throw new Error("布尔点位固定值只能为 0／1");
+      if (
+        ["sequence", "replay"].includes(point.strategy.kind) &&
+        (!Array.isArray(point.strategy.params.values) ||
+          point.strategy.params.values.some(
+            (row: unknown) => !Array.isArray(row) || !valid(row[1]),
+          ))
+      )
+        throw new Error("布尔点位的序列／回放样本值只能为 0／1");
+    }
     const candidate = clone(config.value);
     const d = candidate.devices.find((d: Row) => d.id === deviceId.value);
     const index = d.points.findIndex((p: Row) => p.id === editingId.value);
@@ -942,20 +1061,33 @@ async function exportData(kind: string) {
     notice.value = "导出完成";
   });
 }
-async function viewTrend() {
-  const keys = selected.value.length
-    ? selected.value
-    : points.value
-        .filter((p) => p.type !== "Bool")
-        .slice(0, 1)
-        .map((p) => p.id);
-  if (keys.length > 4) {
-    error.value = "趋势最多选择 4 个点位，请减少选择";
-    return;
-  }
-  trendKeys.value = keys;
+async function viewTrend(point: Row) {
+  trendKeys.value = [point.id];
+  trendData.value = {};
+  pauseChart.value = false;
+  trendAnchor = document.getElementById(`point-value-${point.id}`);
   showTrend.value = true;
+  await nextTick();
+  const popup = document.getElementById("point-trend-popover");
+  if (!popup || !trendAnchor) return;
+  closeRowMenus();
+  trendAnchor.focus({ preventScroll: true });
+  popup.showPopover();
+  placePopover(popup, trendAnchor);
   await poll();
+}
+function closeTrend() {
+  const popup = document.getElementById("point-trend-popover");
+  if (popup?.matches(":popover-open")) popup.hidePopover();
+  showTrend.value = false;
+  trendKeys.value = [];
+  trendData.value = {};
+}
+function trendToggled(event: Event) {
+  const popup = event.target as HTMLElement;
+  if (popup.matches(":popover-open")) {
+    if (trendAnchor) placePopover(popup, trendAnchor);
+  } else closeTrend();
 }
 function chartPath(key: string) {
   const data = (trendData.value[key] as [number, number | null][]) || [];
@@ -1040,6 +1172,8 @@ async function copyEndpoint() {
 }
 onMounted(async () => {
   document.addEventListener("keydown", keydown);
+  document.addEventListener("scroll", dismissRowMenus, true);
+  window.addEventListener("resize", dismissRowMenus);
   try {
     await refreshConfig();
     await refreshDevices();
@@ -1056,6 +1190,8 @@ onUnmounted(() => {
   clearInterval(timer);
   socket?.close();
   document.removeEventListener("keydown", keydown);
+  document.removeEventListener("scroll", dismissRowMenus, true);
+  window.removeEventListener("resize", dismissRowMenus);
 });
 </script>
 
@@ -1290,7 +1426,6 @@ onUnmounted(() => {
               暂停所选策略</button
             ><button @click="pointAction('resume', selected)">
               恢复所选策略</button
-            ><button @click="viewTrend">查看趋势</button
             ><button @click="deletePoints(selected)">删除</button
             ><button @click="selected = []">清空选择</button>
           </div>
@@ -1366,7 +1501,14 @@ onUnmounted(() => {
                   </td>
                   <td class="optional">{{ p.type }}</td>
                   <td class="numeric live-value">
-                    <strong>{{ formatValue(p) }}</strong
+                    <button
+                      :id="`point-value-${p.id}`"
+                      class="text-button current-value"
+                      :aria-label="`查看 ${p.name} 的实时趋势`"
+                      title="查看此点位实时趋势"
+                      @click="viewTrend(p)"
+                    >
+                      <strong>{{ formatValue(p) }}</strong></button
                     ><span>{{ p.unit }}</span>
                   </td>
                   <td class="mobile-secondary">
@@ -1391,27 +1533,34 @@ onUnmounted(() => {
                   </td>
                   <td>
                     <button class="small" @click="openAssign([p])">赋值</button>
-                    <details class="menu row-menu">
-                      <summary aria-label="更多点位操作">更多</summary>
-                      <div>
-                        <button @click="editPoint(p)">查看 / 编辑</button
-                        ><button
-                          @click="setInitial(p)"
-                          :disabled="p.value == null"
-                        >
-                          当前值设为初始值</button
-                        ><button
-                          @click="
-                            selected = [p.id];
-                            viewTrend();
-                          "
-                        >
-                          查看趋势</button
-                        ><button @click="pointAction('pause', [p.id])">
-                          暂停策略</button
-                        ><button @click="deletePoints([p.id])">删除点位</button>
-                      </div>
-                    </details>
+                    <button
+                      :id="`point-more-${p.id}`"
+                      class="small row-menu"
+                      aria-label="更多点位操作"
+                      :popovertarget="`point-menu-${p.id}`"
+                    >
+                      更多
+                    </button>
+                    <div
+                      :id="`point-menu-${p.id}`"
+                      popover="auto"
+                      class="point-menu"
+                      role="group"
+                      :aria-label="`${p.name}的点位操作`"
+                      @toggle="positionRowMenu($event, p.id)"
+                      @click="closeRowMenus(true)"
+                    >
+                      <button @click="editPoint(p)">查看 / 编辑</button
+                      ><button
+                        @click="setInitial(p)"
+                        :disabled="p.value == null"
+                      >
+                        当前值设为初始值</button
+                      ><button @click="viewTrend(p)">查看趋势</button
+                      ><button @click="pointAction('pause', [p.id])">
+                        暂停策略</button
+                      ><button @click="deletePoints([p.id])">删除点位</button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -1426,23 +1575,31 @@ onUnmounted(() => {
             ><select v-model.number="size" aria-label="每页数量">
               <option :value="25">25 / 页</option>
               <option :value="50">50 / 页</option>
-              <option :value="100">100 / 页</option></select
-            ><button @click="viewTrend">实时趋势</button>
+              <option :value="100">100 / 页</option>
+            </select>
           </footer>
         </section>
         <section
-          v-if="tab === 'monitor' && showTrend"
-          class="panel trend-panel"
+          v-if="tab === 'monitor'"
+          id="point-trend-popover"
+          popover="auto"
+          class="trend-popover"
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby="trend-title"
+          @toggle="trendToggled"
         >
           <div class="section-title">
             <div>
-              <h2>实时趋势</h2>
-              <p>最近 600 个采样 · 不同单位分图 · 实时缓存</p>
+              <h2 id="trend-title">实时趋势</h2>
+              <p>当前点位 · 最近 600 个采样 · 实时缓存</p>
             </div>
             <div class="button-row">
               <button @click="pauseChart = !pauseChart">
                 {{ pauseChart ? "恢复图表刷新" : "暂停图表刷新" }}</button
-              ><button @click="showTrend = false">收起趋势</button>
+              ><button autofocus aria-label="关闭实时趋势" @click="closeTrend">
+                关闭
+              </button>
             </div>
           </div>
           <div v-for="key in trendKeys" :key="key" class="chart">
@@ -1791,17 +1948,7 @@ onUnmounted(() => {
                 >写入后行为<select
                   aria-label="写入后行为"
                   v-model="draft.write_mode"
-                  @change="
-                    draft.write_mode === 'control' &&
-                    (draft.strategy = {
-                      kind: 'none',
-                      enabled: true,
-                      interval: 1,
-                      seed: 1,
-                      params: {},
-                      dependencies: [],
-                    })
-                  "
+                  @change="changeWriteMode"
                 >
                   <option
                     v-for="(label, key) in modeNames"
@@ -1850,16 +1997,33 @@ onUnmounted(() => {
               </div>
             </details>
             <h3>模拟策略</h3>
+            <p v-if="draft.type === 'Bool'" class="hint">
+              布尔点位只接受
+              0／1。固定值使用关／开；序列、回放的样本和表达式结果也必须为
+              0／1。
+            </p>
+            <p v-if="draft.write_mode === 'control'" class="hint">
+              当前为控制输入。选择生成策略后，写入后行为将切换为“保持写入值”，该点位可按策略自动变化。
+            </p>
             <div class="form-grid">
               <label
                 >策略类型<select
                   aria-label="策略类型"
                   v-model="draft.strategy.kind"
-                  :disabled="draft.write_mode === 'control'"
                   @change="changeStrategy"
                 >
                   <option
-                    v-for="(label, key) in strategyNames"
+                    v-if="
+                      draft.type === 'Bool' &&
+                      !booleanStrategies.includes(draft.strategy.kind)
+                    "
+                    :value="draft.strategy.kind"
+                    disabled
+                  >
+                    当前策略不适用于 Bool，请重新选择
+                  </option>
+                  <option
+                    v-for="(label, key) in availableStrategies"
                     :key="key"
                     :value="key"
                   >
@@ -1883,7 +2047,21 @@ onUnmounted(() => {
                   v-model="draft.strategy.enabled"
                 />启用策略</label
               ><label
-                v-for="[key, label] in parameters[draft.strategy.kind] || []"
+                v-if="draft.type === 'Bool' && draft.strategy.kind === 'fixed'"
+                >固定值<select
+                  aria-label="固定值"
+                  v-model="draft.strategy.params.value"
+                >
+                  <option :value="0">关（0）</option>
+                  <option :value="1">开（1）</option>
+                </select></label
+              ><label
+                v-for="[key, label] in (
+                  parameters[draft.strategy.kind] || []
+                ).filter(
+                  ([key]: string[]) =>
+                    !(draft.type === 'Bool' && key === 'value'),
+                )"
                 :key="key"
                 >{{ label
                 }}<input
