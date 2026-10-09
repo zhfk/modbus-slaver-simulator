@@ -4,7 +4,7 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 
 ## 独立下载包（无需安装依赖）
 
-GitHub [Releases](https://github.com/zhfk/modbus-slaver-simulator/releases) 提供原生目录包：Linux x86_64、Windows x64、macOS Apple Silicon。完整解压后，Windows 双击 `start.cmd`，Linux 运行 `./start.sh`，macOS 运行 `./start.command`。包内包含 Python、应用依赖、前端页面和离线字体，用户不需要安装 Python 或 Node.js。
+GitHub [v0.2.0rc5 下载](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5) 提供已通过原生检查的目录包：Linux x86_64、Windows x64、macOS Apple Silicon。完整解压后，Windows 双击 `start.cmd`，Linux 运行 `./start.sh`，macOS 运行 `./start.command`。包内包含 Python、应用依赖、前端页面和离线字体，用户不需要安装 Python 或 Node.js。启动后打开 `http://127.0.0.1:8000`。
 
 支持分别创建“从机 1#、2#、3#…”：共用 IP／端口时使用不同 Unit ID，或分别使用不同端口；点位、策略和值互相独立，停止一台不影响其他设备。默认最多 16 台设备、8 个端点、10000 个点位。
 

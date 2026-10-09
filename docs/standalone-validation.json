@@ -1,0 +1,95 @@
+{
+  "version": "0.2.0rc5",
+  "release_url": "https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc5",
+  "source_commit": "3391c00d7d954dfd87f4feb2cd3e2cc30bbc5ece",
+  "download_integrity_passed": true,
+  "assets": [
+    {
+      "name": "modbus-simulator-0.2.0rc5-linux-x86_64.tar.gz",
+      "bytes": 31422837,
+      "sha256": "86e7603e543eac1e9fba904dbceab80e8eb9faa31c1df86afbc03218b1e1471a",
+      "platform": "linux",
+      "architecture": "x86_64",
+      "python": "3.12.15",
+      "os": "Linux-6.8.0-1064-azure-x86_64-with-glibc2.35",
+      "libc": [
+        "glibc",
+        "2.35"
+      ]
+    },
+    {
+      "name": "modbus-simulator-0.2.0rc5-windows-x86_64.zip",
+      "bytes": 17991201,
+      "sha256": "b7cbcd6d9f773f028bcc494cdb441e9ec2a3286d1eb41e7ff7c39451897c5f54",
+      "platform": "windows",
+      "architecture": "x86_64",
+      "python": "3.12.10",
+      "os": "Windows-2022Server-10.0.20348-SP0",
+      "libc": [
+        "",
+        ""
+      ]
+    },
+    {
+      "name": "modbus-simulator-0.2.0rc5-macos-arm64.tar.gz",
+      "bytes": 16536774,
+      "sha256": "e499dae11fb00b5203ef92fa450d8e16c94da7df2d7fc39a52b3b8a22ab2f717",
+      "platform": "macos",
+      "architecture": "arm64",
+      "python": "3.12.10",
+      "os": "macOS-15.7.9-arm64-arm-64bit",
+      "libc": [
+        "",
+        ""
+      ]
+    }
+  ],
+  "downloaded_linux_check": {
+    "passed": true,
+    "version": "0.2.0rc5",
+    "checked_at_utc": "2026-10-09T08:12:40.411614+00:00",
+    "checks": [
+      "bundled page/assets/fonts and deep links without system Python/PATH",
+      "three devices share one endpoint with isolated Unit IDs, values and stop",
+      "real WebSocket snapshot from bundled protocol adapter",
+      "spawned Excel export/import workers and temporary cleanup",
+      "external supervisor observes real business progress",
+      "offline compact and backup restore with bundled SQLite"
+    ]
+  },
+  "checked_at_utc": "2026-10-09T08:13:36.810117+00:00",
+  "workflow_url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363",
+  "native_jobs": [
+    {
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363/job/113730436741",
+      "status": "completed successfully",
+      "name": "build (macos-15, macos, arm64)"
+    },
+    {
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363/job/113730437089",
+      "status": "completed successfully",
+      "name": "build (ubuntu-22.04, linux, x86_64)"
+    },
+    {
+      "url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/37903229363/job/113730436998",
+      "status": "completed successfully",
+      "name": "build (windows-2022, windows, x86_64)"
+    }
+  ],
+  "short_load": {
+    "status": "passed",
+    "completed_seconds": 140.576,
+    "requests": 8322,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "f95a6192fbce253760c4c774abf72e4980ce4fbfcd9d10aee6aad7bccbe680b0",
+    "p99_ms": 25.18315899942536,
+    "version": "0.2.0rc4"
+  },
+  "pending_acceptance": [
+    "24-hour and 72-hour endurance gates",
+    "Target desktop OS and service-account operation",
+    "Second-machine LAN and firewall verification"
+  ]
+}
