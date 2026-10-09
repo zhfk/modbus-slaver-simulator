@@ -203,12 +203,12 @@ def create_app(data_dir=None, static_dir=None):
                 "unknown_unit",
                 "valid_ranges",
             )
-            before = {p.id: p.layout() for p in prior.points}
-            after = {p.id: p.layout() for p in replacement.points}
-            if before != after or any(
+            if active.status != "running":
+                raise DomainError(f"设备正在切换状态：{prior.name}", 409)
+            if any(
                 getattr(prior, f) != getattr(replacement, f) for f in endpoint_fields
             ):
-                raise DomainError(f"映射或监听变更需要先停止设备：{prior.name}", 409)
+                raise DomainError(f"监听变更需要先停止设备：{prior.name}", 409)
 
     async def save(new):
         guard()
@@ -458,6 +458,34 @@ def create_app(data_dir=None, static_dir=None):
     @app.get("/api/devices/{key}/trends")
     async def trends(key: str, ids: str):
         return runtime.subscribe(key, ids.split(",") if ids else [])
+
+    @app.get("/api/devices/{key}/connections")
+    async def connections(key: str):
+        device = runtime.get(key)
+        endpoint = modbus.endpoints.get((device.config.host, device.config.port))
+        active = bool(endpoint and endpoint.units.get(device.config.unit_id) == key)
+        items = []
+        if endpoint:
+            for client in endpoint.clients.values():
+                visit = client["devices"].get(device.config.unit_id, {})
+                matched = active and visit.get("device") == key
+                items.append(
+                    {
+                        **{k: v for k, v in client.items() if k != "devices"},
+                        "device_requests": visit.get("requests", 0) if matched else 0,
+                        "device_last_request": visit.get("last_request")
+                        if matched
+                        else None,
+                        "accessed_device": bool(matched),
+                    }
+                )
+        return {
+            "items": sorted(items, key=lambda item: (item["connected_at"], item["id"])),
+            "active": active,
+            "host": device.config.host,
+            "port": device.config.port,
+            "unit_id": device.config.unit_id,
+        }
 
     @app.get("/api/diagnostics")
     async def diagnostics(

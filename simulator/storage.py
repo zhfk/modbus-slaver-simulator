@@ -347,6 +347,12 @@ class Storage:
                 16 * MiB, new.settings.config_budget_mb * MiB // 2
             ):
                 raise DomainError("配置大小超过预算")
+            # Allocate and compile before persistence; inherit current values only
+            # at activation, so writes received during the DB await are retained.
+            try:
+                prepared = runtime.prepare(new)
+            except (MemoryError, ValueError, TypeError) as exc:
+                raise DomainError("无法准备新点位映射，配置未保存", 503) from exc
             self.config_pending = True
 
             def write(conn):
@@ -367,7 +373,7 @@ class Storage:
             async def activate():
                 try:
                     await asyncio.wrap_future(future)
-                    runtime.apply(new)
+                    runtime.apply(new, prepared)
                     self.config = new
                     runtime.event("config", "", f"配置版本 {new.version} 已生效")
                     self.config_pending = False

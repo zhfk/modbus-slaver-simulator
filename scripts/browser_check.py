@@ -6,11 +6,14 @@ import json
 import os
 import shutil
 import socket
+import struct
 from io import BytesIO
 from openpyxl import load_workbook
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from playwright.async_api import async_playwright, expect
+from simulator.excel import write_workbook
+from simulator.models import Point
 
 
 async def run(url, output):
@@ -687,6 +690,17 @@ async def run(url, output):
         await expect(page.get_by_label("目标温度依赖", exact=True)).to_have_value(
             custom_id
         )
+        await page.get_by_label("策略类型", exact=True).select_option("expression")
+        await page.get_by_label("依赖点位", exact=True).select_option(
+            [command_id, custom_id]
+        )
+        variables = page.get_by_label("表达式变量说明", exact=True)
+        await expect(variables).to_contain_text("x0 = 启动命令 的当前工程值")
+        await expect(variables).to_contain_text("x1 = 随机测试点 的当前工程值")
+        await page.get_by_label("依赖点位", exact=True).select_option(custom_id)
+        await expect(variables).to_contain_text("x0 = 随机测试点 的当前工程值")
+        await expect(variables).not_to_contain_text("x1 =")
+        await expect(variables).to_contain_text("累计运行秒数")
         await page.keyboard.press("Escape")
         for mode in ("温控模板（4 个联动点位）", "空设备"):
             await page.get_by_role("button", name="新建设备", exact=True).click()
@@ -908,11 +922,60 @@ async def run(url, output):
         ).to_be_disabled()
         await expect(
             menu.get_by_role("menuitem", name="重置全部当前值", exact=True)
-        ).to_be_disabled()
+        ).to_be_enabled()
         await expect(
             menu.get_by_role("menuitem", name="删除设备", exact=True)
         ).to_be_disabled()
         await page.keyboard.press("Escape")
+        response = await page.request.post(
+            url + f"/api/devices/{second['id']}/assign",
+            data={"items": [{"id": "context-reset-point", "value": 88}]},
+        )
+        assert response.status == 200
+        await device_action("共享端点第二台", "重置全部当前值")
+        await expect(
+            page.locator(".device-link").filter(has_text="共享端点第二台")
+        ).to_contain_text("运行中")
+        reset_points = await (
+            await page.request.get(url + f"/api/devices/{second['id']}/points")
+        ).json()
+        assert reset_points["items"][0]["value"] == 12
+        await page.locator(".device-link").filter(has_text="共享端点第二台").click()
+        await page.get_by_role("button", name="点位监控", exact=True).click()
+        await page.get_by_role("button", name="新增点位", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        await expect(dialog.locator(".form-note")).to_contain_text("可运行中保存")
+        await dialog.get_by_label("名称", exact=True).fill("在线新增点位")
+        await dialog.get_by_role("button", name="保存配置", exact=True).click()
+        await expect(
+            page.get_by_role("button", name="在线新增点位", exact=True)
+        ).to_be_visible()
+        current = await (await page.request.get(url + "/api/config")).json()
+        online_device = next(d for d in current["devices"] if d["id"] == second["id"])
+        online_device["points"].append(
+            Point(
+                id="browser-import-live", name="在线导入点位", address=8, initial=33
+            ).model_dump()
+        )
+        book = output / "online-import.xlsx"
+        write_workbook({"kind": "config", "devices": [online_device]}, book)
+        await page.get_by_role("button", name="导入", exact=True).click()
+        dialog = page.get_by_role("dialog")
+        await dialog.locator("input[type=file]").set_input_files(book)
+        await dialog.get_by_role("button", name="解析并校验", exact=True).click()
+        apply_button = dialog.get_by_role("button", name="应用配置", exact=True)
+        await expect(apply_button).to_be_enabled()
+        await apply_button.click()
+        await expect(
+            dialog.get_by_role("heading", name="导入已完成", exact=True)
+        ).to_be_visible()
+        await page.keyboard.press("Escape")
+        await expect(
+            page.get_by_role("button", name="在线导入点位", exact=True)
+        ).to_be_visible()
+        await expect(
+            page.locator(".device-link").filter(has_text="共享端点第二台")
+        ).to_contain_text("运行中")
         await device_action("共享端点第二台", "停止设备")
         await expect(
             page.locator(".device-link").filter(has_text="共享端点第二台")
@@ -1253,11 +1316,217 @@ async def run(url, output):
             await expect(
                 page.get_by_label("选择设备 批量故障设备", exact=True)
             ).to_have_count(0)
+        # Real TCP sessions: idle and shared across two Unit IDs.
+        await page.set_viewport_size({"width": 1440, "height": 1000})
+        current = await (await page.request.get(url + "/api/config")).json()
+        first = current["devices"][0]
+        second = next(d for d in current["devices"] if d["id"] == "batch-second")
+        second["points"] = [
+            {"id": "connection-value", "name": "value", "type": "UInt16", "initial": 10}
+        ]
+        changed = await page.request.put(url + "/api/config", data=current)
+        assert changed.status == 200, await changed.text()
+        started = await page.request.post(
+            url + "/api/devices/actions/start",
+            data={"ids": [first["id"], second["id"]]},
+        )
+        assert (await started.json())["success"] == 2
+        idle_reader, idle_writer = await asyncio.open_connection(
+            first["host"], first["port"]
+        )
+        peer_reader, peer_writer = await asyncio.open_connection(
+            first["host"], first["port"]
+        )
+        transaction = 700
+
+        async def tcp_request(unit, count=2, reply=True):
+            nonlocal transaction
+            transaction += 1
+            request = struct.pack(">HHHBBHH", transaction, 0, 6, unit, 3, 0, count)
+            peer_writer.write(request)
+            await peer_writer.drain()
+            if reply:
+                header = await asyncio.wait_for(peer_reader.readexactly(7), 2)
+                length = int.from_bytes(header[4:6], "big")
+                body = await asyncio.wait_for(peer_reader.readexactly(length - 1), 2)
+                assert header[:2] == request[:2] and body[0] == 3
+            return request.hex()
+
+        try:
+            await tcp_request(second["unit_id"], 1)
+            await page.reload()
+            await expect(
+                page.get_by_role("heading", name=first["name"], exact=True)
+            ).to_be_visible()
+            assert [
+                label.strip()
+                for label in await page.locator(".tabs button").all_text_contents()
+            ] == [
+                "点位监控",
+                "连接信息",
+                "通信诊断",
+            ]
+            await page.get_by_role("button", name="连接信息", exact=True).click()
+            panel = page.locator(".connection-panel")
+            await expect(
+                panel.get_by_role("heading", name="连接信息", exact=True)
+            ).to_be_visible()
+            await expect(panel.locator("tbody tr")).to_have_count(2)
+            await expect(panel.locator(".connection-summary")).to_contain_text(
+                "已访问当前设备 0 条"
+            )
+            await expect(
+                panel.get_by_role("cell", name="其他 Unit／设备", exact=True)
+            ).to_have_count(1)
+            ports = {
+                str(idle_writer.get_extra_info("sockname")[1]),
+                str(peer_writer.get_extra_info("sockname")[1]),
+            }
+            for port in ports:
+                await expect(
+                    panel.get_by_role("cell", name=port, exact=True)
+                ).to_be_visible()
+            await tcp_request(first["unit_id"])
+            await expect(panel.locator(".connection-summary")).to_contain_text(
+                "已访问当前设备 1 条"
+            )
+            await page.get_by_role("button", name="通信诊断", exact=True).click()
+            trigger = page.locator(".packet-trigger").first
+            await expect(trigger).to_be_visible()
+            logs = await (
+                await page.request.get(url + f"/api/diagnostics?device={first['id']}")
+            ).json()
+            packet = logs["items"][0]
+            packet_text = " ".join(
+                packet["request"][i : i + 2]
+                for i in range(0, len(packet["request"]), 2)
+            )
+            diagnostics_panel = page.locator("main > section.panel").filter(
+                has=page.get_by_role("heading", name="通信诊断", exact=True)
+            )
+            before = await diagnostics_panel.bounding_box()
+            await trigger.click()
+            popup = page.locator("#packet-detail-popover:popover-open")
+            await expect(popup).to_be_visible()
+            await expect(popup.get_by_label("请求报文", exact=True)).to_have_text(
+                packet_text
+            )
+            assert await diagnostics_panel.bounding_box() == before
+            # Evict the selected row from the displayed 100 records while focused inside.
+            for _ in range(105):
+                await tcp_request(first["unit_id"])
+            await page.wait_for_timeout(2200)
+            await expect(popup).to_be_visible()
+            await expect(popup.get_by_label("请求报文", exact=True)).to_have_text(
+                packet_text
+            )
+            assert (
+                await page.locator(".packet-trigger[aria-expanded='true']").count() == 0
+            )
+            await page.keyboard.press("Escape")
+            await expect(popup).to_have_count(0)
+            await expect(page.locator("#diagnostics-tab")).to_be_focused()
+            # Unknown units use the actual configured silence policy.
+            silent_request = await tcp_request(99, reply=False)
+            await page.wait_for_timeout(1100)
+            for width in (1440, 1024, 390):
+                await page.set_viewport_size(
+                    {"width": width, "height": 1000 if width > 500 else 844}
+                )
+                trigger = page.locator(".packet-trigger").first
+                await trigger.scroll_into_view_if_needed()
+                before = await diagnostics_panel.bounding_box()
+                await trigger.click()
+                await expect(popup).to_be_visible()
+                await expect(popup.get_by_label("响应报文", exact=True)).to_have_text(
+                    "无响应"
+                )
+                await expect(popup.get_by_label("请求报文", exact=True)).to_have_text(
+                    " ".join(
+                        silent_request[i : i + 2]
+                        for i in range(0, len(silent_request), 2)
+                    )
+                )
+                await page.wait_for_timeout(1200)
+                await expect(popup).to_be_visible()
+                assert await diagnostics_panel.bounding_box() == before
+                bounds = await popup.bounding_box()
+                assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+                assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= (
+                    1000 if width > 500 else 844
+                )
+                await popup.get_by_label("请求报文", exact=True).focus()
+                await expect(popup).to_be_visible()
+                await page.screenshot(path=str(output / f"packet-popover-{width}.png"))
+                await popup.get_by_role(
+                    "button", name="关闭报文详情", exact=True
+                ).click()
+                await expect(popup).to_have_count(0)
+                await expect(trigger).to_be_focused()
+                assert not await page.evaluate(
+                    "document.documentElement.scrollWidth > innerWidth"
+                )
+            await page.set_viewport_size({"width": 1440, "height": 1000})
+            await trigger.click()
+            await page.get_by_role("heading", name="通信诊断", exact=True).click()
+            await expect(popup).to_have_count(0)
+            await trigger.click()
+            await page.locator("#diagnostics-tab").focus()
+            await expect(popup).to_have_count(0)
+            await trigger.click()
+            await page.evaluate("window.dispatchEvent(new Event('blur'))")
+            await expect(popup).to_have_count(0)
+            await page.get_by_role("button", name="连接信息", exact=True).click()
+            for width in (1440, 1024, 390):
+                await page.set_viewport_size(
+                    {"width": width, "height": 1000 if width > 500 else 844}
+                )
+                await expect(panel.locator("tbody tr")).to_have_count(2)
+                assert not await page.evaluate(
+                    "document.documentElement.scrollWidth > innerWidth"
+                )
+                await page.screenshot(path=str(output / f"connections-{width}.png"))
+            await page.set_viewport_size({"width": 1440, "height": 1000})
+            await page.locator(".device-link").filter(has_text=second["name"]).click()
+            await expect(panel.locator(".connection-summary")).to_contain_text(
+                "已访问当前设备 1 条"
+            )
+            await page.locator(".device-link").filter(has_text=first["name"]).click()
+            assert (
+                await page.request.post(
+                    url + f"/api/devices/{first['id']}/actions/stop"
+                )
+            ).status == 200
+            await expect(panel.locator(".connection-summary")).to_contain_text(
+                "当前设备已停止"
+            )
+            await expect(panel.locator(".connection-summary")).to_contain_text(
+                "已访问当前设备 0 条"
+            )
+            await expect(panel.locator("tbody tr")).to_have_count(2)
+        finally:
+            for writer in (idle_writer, peer_writer):
+                writer.close()
+                await writer.wait_closed()
+        await expect(panel.locator("tbody tr")).to_have_count(0)
+        await expect(
+            panel.get_by_role("heading", name="暂无活动连接", exact=True)
+        ).to_be_visible()
+        assert (
+            await page.request.post(url + f"/api/devices/{second['id']}/actions/stop")
+        ).status == 200
         assert not failures, failures
         await browser.close()
     report = {
         "passed": True,
         "checks": [
+            "point drawer saves a new point while running; actual Excel upload, preview and apply add a point without stopping",
+            "running device reset is available in the card menu and restores initial values without stopping communication",
+            "expression dependency xN mapping follows selected order and updates after removal, with elapsed-time and syntax guidance",
+            "live TCP peers and ports, idle/shared-unit attribution, device switching, stopped-device distinction and disconnect cleanup",
+            "packet snapshot survives polling and eviction of selected row from 100-record table without reflow",
+            "packet HEX and real no-response detail at 1440/1024/390, internal focus, close/Escape focus return",
+            "packet popover closes on outside click, focus exit and window blur",
             "thermal roles chosen independently in any order, custom target retained, missing/duplicate dependencies rejected without losing draft",
             "saving enabled point on paused device preserves pause and explains explicit device resume",
             "real constant trend visible with adaptive Y ticks, nearest-sample tooltip and keyboard inspection at 1440/1024/390",

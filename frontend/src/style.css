@@ -464,6 +464,7 @@ pre {
 }
 .point-menu,
 .trend-popover,
+.packet-popover,
 .device-context-menu {
   position: fixed;
   inset: auto;
@@ -514,6 +515,32 @@ pre {
   width: 720px;
   padding: 20px;
   border-radius: 24px;
+}
+.packet-popover {
+  width: 640px;
+  padding: 20px;
+}
+.packet-popover .section-title {
+  padding: 0;
+}
+.packet-popover pre {
+  font-family: ui-monospace, monospace;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  line-height: 1.7;
+}
+.packet-popover p {
+  overflow-wrap: anywhere;
+}
+.connection-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  padding: 0 16px;
+}
+.connection-hint {
+  padding: 0 16px;
 }
 .current-value {
   padding: 0;
@@ -617,7 +644,9 @@ tr.selected > td:first-child {
 .current-value:hover,
 .current-value:focus-visible,
 .state-button:hover:not(:disabled),
-.state-button:focus-visible {
+.state-button:focus-visible,
+.packet-trigger:hover,
+.packet-trigger:focus-visible {
   color: var(--interactive);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -669,11 +698,6 @@ tr.selected > td:first-child {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   margin: 14px 0;
-}
-.packet {
-  max-width: 440px;
-  white-space: normal;
-  padding: 10px 0;
 }
 .chart {
   border-top: 1px solid var(--line);

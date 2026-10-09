@@ -364,11 +364,11 @@ def test_delete_legacy_overlap_preserves_remaining_devices_and_recovers(
             original = runtime.apply
             attempts = []
 
-            def fail_once(config):
+            def fail_once(config, prepared=None):
                 attempts.append(config.version)
                 if len(attempts) == 1:
                     raise RuntimeError("injected activation failure")
-                return original(config)
+                return original(config, prepared)
 
             monkeypatch.setattr(runtime, "apply", fail_once)
         response = http.delete(f"/api/devices/{key}?version={before['version']}")
@@ -829,3 +829,289 @@ def test_excel_blank_scale_and_precision_follow_type_defaults(tmp_path):
     points = result["config"]["devices"][0]["points"]
     assert all(p["scale"] == 1 for p in points)
     assert [p["precision"] for p in points] == [0, 2, 2, 0, 0]
+
+
+def test_live_connections_distinguish_shared_units_and_cleanup(tmp_path):
+    import socket
+    import struct
+
+    with socket.socket() as free:
+        free.bind(("127.0.0.1", 0))
+        port = free.getsockname()[1]
+    with TestClient(create_app(tmp_path)) as http:
+        cfg = http.get("/api/config").json()
+        cfg["devices"] = [
+            {
+                "id": f"d{i}",
+                "name": f"device{i}",
+                "port": port,
+                "unit_id": i,
+                "points": [{"id": f"p{i}", "name": "value", "initial": i}],
+            }
+            for i in (1, 2)
+        ]
+        assert http.put("/api/config", json=cfg).status_code == 200
+        assert http.get("/api/devices/d1/connections").json()["items"] == []
+        assert (
+            http.post("/api/devices/actions/start", json={"ids": ["d1", "d2"]}).json()[
+                "success"
+            ]
+            == 2
+        )
+        idle = socket.create_connection(("127.0.0.1", port), timeout=2)
+        shared = socket.create_connection(("127.0.0.1", port), timeout=2)
+        try:
+
+            def snapshot(key="d1"):
+                return http.get(f"/api/devices/{key}/connections").json()
+
+            deadline = time.monotonic() + 2
+            while len(snapshot()["items"]) != 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            initial = snapshot()
+            assert initial["active"] and len(initial["items"]) == 2
+            assert {c["port"] for c in initial["items"]} == {
+                idle.getsockname()[1],
+                shared.getsockname()[1],
+            }
+            assert all(
+                c["host"] == "127.0.0.1"
+                and c["requests"] == 0
+                and not c["accessed_device"]
+                for c in initial["items"]
+            )
+            assert all(
+                c["connected_at"] > 0 and c["last_request"] is None
+                for c in initial["items"]
+            )
+
+            def read(unit):
+                shared.sendall(struct.pack(">HHHBBHH", 7, 0, 6, unit, 3, 0, 1))
+                reply = b""
+                while len(reply) < 11:
+                    reply += shared.recv(11 - len(reply))
+                assert int.from_bytes(reply[-2:], "big") == unit
+
+            read(2)
+            assert not any(c["accessed_device"] for c in snapshot()["items"])
+            assert sum(c["accessed_device"] for c in snapshot("d2")["items"]) == 1
+            read(1)
+            read(1)
+            items = snapshot()["items"]
+            current = next(c for c in items if c["port"] == shared.getsockname()[1])
+            assert (
+                current["requests"] == 3
+                and current["device_requests"] == 2
+                and current["accessed_device"]
+            )
+            assert current["last_unit_id"] == 1 and current["device_last_request"] > 0
+            assert "devices" not in current
+            assert {c["id"] for c in items} == {c["id"] for c in initial["items"]}
+            logs = http.get("/api/diagnostics?device=d1").json()["items"]
+            assert len(logs) == 2 and len({r["id"] for r in logs}) == 2
+            old = logs[-1]
+            read(1)
+            assert (
+                next(
+                    r
+                    for r in http.get("/api/diagnostics?device=d1").json()["items"]
+                    if r["id"] == old["id"]
+                )
+                == old
+            )
+
+            # Stopping one unit retains shared TCP sockets for the other unit.
+            assert http.post("/api/devices/d1/actions/stop").status_code == 200
+            stopped = snapshot()
+            assert not stopped["active"] and len(stopped["items"]) == 2
+            assert all(
+                not c["accessed_device"] and c["device_requests"] == 0
+                for c in stopped["items"]
+            )
+            cfg = http.get("/api/config").json()
+            assert (
+                http.delete(f"/api/devices/d1?version={cfg['version']}").status_code
+                == 200
+            )
+            cfg = http.get("/api/config").json()
+            cfg["devices"].append(
+                {
+                    "id": "replacement",
+                    "name": "replacement",
+                    "port": port,
+                    "unit_id": 1,
+                    "points": [{"name": "v", "initial": 1}],
+                }
+            )
+            assert http.put("/api/config", json=cfg).status_code == 200
+            assert (
+                http.post("/api/devices/replacement/actions/start").status_code == 200
+            )
+            assert not any(
+                c["accessed_device"] for c in snapshot("replacement")["items"]
+            )
+            read(1)
+            assert (
+                sum(c["device_requests"] for c in snapshot("replacement")["items"]) == 1
+            )
+        finally:
+            idle.close()
+            shared.close()
+        deadline = time.monotonic() + 2
+        while snapshot("d2")["items"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert snapshot("d2")["items"] == []
+        assert (
+            http.post(
+                "/api/devices/actions/stop", json={"ids": ["d2", "replacement"]}
+            ).json()["success"]
+            == 2
+        )
+        assert http.get("/api/devices/missing/connections").status_code == 404
+        assert http.app.state.modbus.connections == 0
+
+
+@pytest.mark.parametrize("paused", [False, True])
+def test_online_points_excel_replace_and_reset_keep_shared_tcp_session(
+    tmp_path, paused
+):
+    import socket
+    import struct
+    from simulator.models import Device, Point
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    first = Device(
+        id="online",
+        port=port,
+        missing_address="exception",
+        points=[Point(id="base", name="原点位", initial=3, writable=True)],
+    )
+    second = Device(
+        id="neighbor",
+        port=port,
+        unit_id=2,
+        points=[Point(id="neighbor-point", name="其他设备", initial=7)],
+    )
+    with TestClient(create_app(tmp_path)) as http:
+        assert (
+            http.put(
+                "/api/config", json=Configuration(devices=[first, second]).model_dump()
+            ).status_code
+            == 200
+        )
+        for key in (first.id, second.id):
+            assert http.post(f"/api/devices/{key}/actions/start").status_code == 200
+        if paused:
+            assert (
+                http.post(f"/api/devices/{first.id}/actions/pause").status_code == 200
+            )
+        with socket.create_connection(("127.0.0.1", port), timeout=2) as peer:
+            transaction = 0
+
+            def request(unit, function, address, value):
+                nonlocal transaction
+                transaction += 1
+                peer.sendall(
+                    struct.pack(
+                        ">HHHBBHH", transaction, 0, 6, unit, function, address, value
+                    )
+                )
+
+                def receive(count):
+                    data = b""
+                    while len(data) < count:
+                        piece = peer.recv(count - len(data))
+                        assert piece
+                        data += piece
+                    return data
+
+                header = receive(7)
+                assert header[:2] == struct.pack(">H", transaction)
+                return receive(struct.unpack(">H", header[4:6])[0] - 1)
+
+            assert request(1, 6, 0, 42)[0] == 6
+            connection_id = http.get(f"/api/devices/{first.id}/connections").json()[
+                "items"
+            ][0]["id"]
+            before = http.get("/api/config").json()
+            candidate = json.loads(json.dumps(before))
+            candidate["devices"][0]["points"].append(
+                Point(
+                    id="added", name="在线新增", type="Float32", address=2, initial=7.5
+                ).model_dump()
+            )
+            assert http.put("/api/config", json=candidate).status_code == 200
+            assert request(1, 3, 0, 1) == bytes.fromhex("0302002a")
+            assert request(1, 3, 2, 2) == bytes.fromhex("030440f00000")
+
+            candidate = http.get("/api/config").json()
+            exported = Configuration.model_validate(candidate)
+            exported.devices[0].points[0].initial = 99.0
+            exported.devices[0].points.append(
+                Point(id="imported", name="在线导入", address=8, initial=88)
+            )
+            book = tmp_path / "online.xlsx"
+            write_workbook(
+                {"kind": "config", "devices": [exported.devices[0].model_dump()]}, book
+            )
+            preview = http.post(
+                "/api/import/preview?mode=update",
+                files={"file": (book.name, book.read_bytes())},
+            ).json()
+            assert not preview["errors"] and not preview["needs_stop"]
+            assert preview["added"] == 1
+            assert (
+                http.post("/api/import/apply", json=preview["config"]).status_code
+                == 200
+            )
+            assert (
+                http.post("/api/import/apply", json=preview["config"]).status_code
+                == 409
+            )
+            assert request(1, 3, 0, 1) == bytes.fromhex("0302002a")
+            assert request(1, 3, 8, 1) == bytes.fromhex("03020058")
+
+            saved = http.get("/api/config").json()
+            bad = json.loads(json.dumps(saved))
+            bad["devices"][0]["points"][1]["address"] = 0
+            assert http.put("/api/config", json=bad).status_code == 422
+            assert http.get("/api/config").json() == saved
+            bad = json.loads(json.dumps(saved))
+            bad["devices"][0]["port"] += 1
+            assert http.put("/api/config", json=bad).status_code == 409
+            assert request(1, 3, 0, 1) == bytes.fromhex("0302002a")
+
+            replacement = Configuration.model_validate(saved).devices[0]
+            replacement.points = [
+                Point(id="base", name="重映射", address=10, initial=12, writable=True),
+                replacement.points[-1],
+            ]
+            write_workbook(
+                {"kind": "config", "devices": [replacement.model_dump()]}, book
+            )
+            preview = http.post(
+                f"/api/import/preview?mode=replace&target={first.id}",
+                files={"file": (book.name, book.read_bytes())},
+            )
+            data = preview.json()
+            assert not data["errors"] and not data["needs_stop"]
+            assert (
+                http.post("/api/import/apply", json=data["config"]).status_code == 200
+            )
+            assert request(1, 3, 0, 1) == bytes([0x83, 2])
+            assert request(1, 3, 10, 1) == bytes.fromhex("0302000c")
+            assert request(2, 3, 0, 1) == bytes.fromhex("03020007")
+            assert request(1, 6, 10, 55)[0] == 6
+            reset = http.post(f"/api/devices/{first.id}/actions/reset")
+            assert reset.status_code == 200
+            assert (
+                reset.json()["status"] == "running" and reset.json()["paused"] is paused
+            )
+            assert request(1, 3, 10, 1) == bytes.fromhex("0302000c")
+            assert request(2, 3, 0, 1) == bytes.fromhex("03020007")
+            connections = http.get(f"/api/devices/{first.id}/connections").json()
+            assert connections["items"][0]["id"] == connection_id
+            runtime = http.app.state.runtime.get(first.id)
+            assert not runtime.states["base"].hold and runtime.clock >= 0

@@ -495,3 +495,68 @@ def test_thermal_temperature_defaults_are_float32_with_unit_scale():
 def test_invalid_type_still_returns_validation_error_with_dynamic_precision():
     with pytest.raises(ValidationError):
         Point(name="bad", type="unknown")
+
+
+def test_online_map_keeps_compatible_state_and_new_point_clock_starts_now():
+    old = Point(id="old", name="原点位", initial=3)
+    device = Device(id="device", points=[old])
+    runtime = Runtime()
+    runtime.apply(Configuration(devices=[device]))
+    live = runtime.get(device.id)
+    live.status = "running"
+    live.clock = 3600
+    live.assign([{"id": old.id, "value": 42}])
+    runtime.subscribe(device.id, [old.id])
+    before_state = live.states[old.id]
+    added = Point(
+        id="new",
+        name="新表达式",
+        address=2,
+        type="Float32",
+        strategy=Strategy(kind="expression", params={"expression": "t"}, interval=0.1),
+    )
+    candidate = Configuration(
+        devices=[device.model_copy(update={"points": [old, added]})]
+    )
+    runtime.apply(candidate)
+    current = runtime.get(device.id)
+    assert current.value(old.id) == 42 and current.states[old.id].hold
+    assert current.states[old.id] is not before_state
+    assert current.trends[old.id] is live.trends[old.id]
+    current.tick(current.stamp + 0.1)
+    assert current.value(added.id) == pytest.approx(0.1, abs=0.001)
+    assert current.clock == pytest.approx(3600.1)
+    current.paused = True
+    current.reset()
+    assert current.status == "running" and current.paused and current.clock == 0
+    assert current.value(old.id) == 3 and not current.states[old.id].hold
+    assert not current.trends[old.id]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_never_ticks_replaced_device_after_yield(monkeypatch):
+    runtime = Runtime()
+    config = Configuration(devices=[Device(id="a"), Device(id="b", unit_id=2)])
+    runtime.apply(config)
+    obsolete = runtime.get("b")
+    ticks = []
+    monkeypatch.setattr(obsolete, "tick", lambda now: ticks.append("obsolete"))
+    real_sleep = asyncio.sleep
+    sleeps = 0
+
+    async def activate_during_yield(delay):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 1:
+            runtime.apply(config)
+            monkeypatch.setattr(
+                runtime.get("b"), "tick", lambda now: ticks.append("current")
+            )
+        if delay:
+            raise asyncio.CancelledError()
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", activate_during_yield)
+    with pytest.raises(asyncio.CancelledError):
+        await runtime.run()
+    assert ticks == ["current"]

@@ -52,6 +52,10 @@ const health = ref<Row>({ storage: {}, endpoints: [] }),
   diagnostics = ref<Row[]>([]),
   onlyErrors = ref(false),
   expandedLog = ref<Row | null>(null);
+const connections = ref<Row>({ items: [], active: false });
+const deviceConnectionCount = computed(
+  () => connections.value.items.filter((c: Row) => c.accessed_device).length,
+);
 const showNav = ref(false),
   showTrend = ref(false),
   pauseChart = ref(false),
@@ -576,6 +580,12 @@ async function poll() {
         if (key === deviceId.value && errorsOnly === onlyErrors.value)
           diagnostics.value = data.items;
       }
+      if (tab.value === "connections") {
+        const key = deviceId.value;
+        const data = await request(`/api/devices/${key}/connections`);
+        if (key === deviceId.value && tab.value === "connections")
+          connections.value = data;
+      }
       if (showTrend.value && !pauseChart.value && trendKeys.value.length) {
         const key = deviceId.value;
         const ids = trendKeys.value.join(",");
@@ -610,6 +620,9 @@ async function selectDevice(key: string) {
 watch(deviceId, async (key, previous) => {
   closeTrend();
   closeRuntimeStatus();
+  closePacket();
+  connections.value = { items: [], active: false };
+  diagnostics.value = [];
   if (deviceMemory.size >= 16)
     deviceMemory.delete(deviceMemory.keys().next().value!);
   if (previous)
@@ -660,7 +673,71 @@ watch(onlyErrors, () => poll());
 watch(tab, () => {
   closeTrend();
   closeRuntimeStatus();
+  closePacket();
 });
+function diagnosticKey(row: Row) {
+  return (
+    row.id || `${row.time}-${row.host}-${row.transaction_id}-${row.unit_id}`
+  );
+}
+let packetAnchor: HTMLElement | null = null;
+async function openPacket(row: Row, event: Event) {
+  closeTrend();
+  closeRuntimeStatus();
+  closeDeviceMenu();
+  closeRowMenus();
+  packetAnchor = event.currentTarget as HTMLElement;
+  expandedLog.value = clone(row);
+  await nextTick();
+  const popup = document.getElementById("packet-detail-popover");
+  if (!popup || !expandedLog.value) return;
+  popup.showPopover();
+  repositionPacket();
+  popup
+    .querySelector<HTMLButtonElement>("button")
+    ?.focus({ preventScroll: true });
+}
+function closePacket(restoreFocus = false) {
+  const popup = document.getElementById("packet-detail-popover");
+  if (popup?.matches(":popover-open")) popup.hidePopover();
+  expandedLog.value = null;
+  if (restoreFocus)
+    (packetAnchor?.isConnected
+      ? packetAnchor
+      : document.getElementById("diagnostics-tab")
+    )?.focus({ preventScroll: true });
+}
+function packetToggled(event: Event) {
+  if ((event as ToggleEvent).newState === "closed") expandedLog.value = null;
+}
+function packetFocusOut(event: FocusEvent) {
+  if (
+    !(event.relatedTarget instanceof Node) ||
+    !(event.currentTarget as HTMLElement).contains(event.relatedTarget)
+  )
+    closePacket();
+}
+function repositionPacket() {
+  const popup = document.getElementById("packet-detail-popover");
+  const anchor = packetAnchor?.isConnected
+    ? packetAnchor
+    : document.getElementById("diagnostics-tab");
+  if (popup?.matches(":popover-open") && anchor) placePopover(popup, anchor);
+}
+function packetWindowBlur() {
+  closePacket();
+}
+function packetHex(value: string) {
+  return value ? value.match(/.{1,2}/g)?.join(" ") : "无响应";
+}
+function connectionDuration(since: number) {
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000 - since));
+  return seconds >= 3600
+    ? `${Math.floor(seconds / 3600)}时 ${Math.floor(seconds / 60) % 60}分`
+    : seconds >= 60
+      ? `${Math.floor(seconds / 60)}分 ${seconds % 60}秒`
+      : `${seconds}秒`;
+}
 function toggleAll() {
   selected.value = allSelected.value ? [] : visibleIds.value.slice();
 }
@@ -807,6 +884,7 @@ function dismissRowMenus(event: Event) {
 async function openModal(kind: string) {
   if (!(await closeModal())) return false;
   closeTrend();
+  closePacket();
   closeRuntimeStatus();
   closeDeviceMenu(true);
   closeRowMenus(true);
@@ -837,6 +915,14 @@ async function closeModal() {
   return true;
 }
 function keydown(e: KeyboardEvent) {
+  if (
+    e.key === "Escape" &&
+    document.getElementById("packet-detail-popover")?.matches(":popover-open")
+  ) {
+    e.preventDefault();
+    closePacket(true);
+    return;
+  }
   if (
     e.key === "Escape" &&
     document.getElementById("device-context-menu")?.matches(":popover-open")
@@ -886,7 +972,9 @@ async function deviceAction(kind: string, key = deviceId.value) {
     return;
   if (
     kind === "reset" &&
-    !confirm(`将 ${target.name} 的全部点位恢复初始值并清除保持状态，是否继续？`)
+    !confirm(
+      `将 ${target.name} 的全部点位恢复初始值、清除保持状态并重新开始策略计时，${target.status === "running" ? "保持通信和设备策略暂停状态" : "保持设备停止状态"}，是否继续？`,
+    )
   )
     return;
   await action(async () => {
@@ -900,7 +988,9 @@ async function deviceAction(kind: string, key = deviceId.value) {
         ? `${target.name} 已暂停策略，Modbus 仍可读写`
         : kind === "resume"
           ? `${target.name} 已恢复设备策略，点位手动保持仍需单独恢复`
-          : `${target.name} 的设备操作已完成`;
+          : kind === "reset"
+            ? `${target.name} 已恢复初始值并清除保持；${target.status === "running" ? (target.paused ? "通信继续，设备策略仍暂停" : "通信与策略继续运行") : "设备保持停止"}`
+            : `${target.name} 的设备操作已完成`;
   });
 }
 function toggleAllDevices() {
@@ -1250,7 +1340,7 @@ async function savePoint() {
 async function deletePoints(ids: string[]) {
   if (
     !confirm(
-      `删除 ${ids.length} 个点位？设备须停止，被其他点位依赖的点位无法直接删除。`,
+      `删除 ${ids.length} 个点位？通信保持运行，删除后这些地址将按未配置地址规则响应；被其他点位依赖的点位无法直接删除。`,
     )
   )
     return;
@@ -1621,6 +1711,8 @@ onMounted(async () => {
   document.addEventListener("pointerdown", dismissDeviceMenu);
   document.addEventListener("scroll", dismissRowMenus, true);
   window.addEventListener("resize", dismissRowMenus);
+  window.addEventListener("resize", repositionPacket);
+  window.addEventListener("blur", packetWindowBlur);
   try {
     await refreshConfig();
     await refreshDevices();
@@ -1641,6 +1733,8 @@ onUnmounted(() => {
   document.removeEventListener("pointerdown", dismissDeviceMenu);
   document.removeEventListener("scroll", dismissRowMenus, true);
   window.removeEventListener("resize", dismissRowMenus);
+  window.removeEventListener("resize", repositionPacket);
+  window.removeEventListener("blur", packetWindowBlur);
 });
 </script>
 
@@ -1803,6 +1897,15 @@ onUnmounted(() => {
           >
             点位监控</button
           ><button
+            :class="{ active: tab === 'connections' }"
+            @click="
+              tab = 'connections';
+              poll();
+            "
+          >
+            连接信息</button
+          ><button
+            id="diagnostics-tab"
             :class="{ active: tab === 'diagnostics' }"
             @click="
               tab = 'diagnostics';
@@ -2206,6 +2309,75 @@ onUnmounted(() => {
             </p>
           </div>
         </section>
+        <section v-if="tab === 'connections'" class="panel connection-panel">
+          <div class="section-title">
+            <div>
+              <h2>连接信息</h2>
+              <p>
+                当前设备 Unit {{ device.unit_id }} · {{ device.host }}:{{
+                  device.port
+                }}
+              </p>
+            </div>
+          </div>
+          <div class="connection-summary">
+            <strong>已访问当前设备 {{ deviceConnectionCount }} 条</strong>
+            <span>监听端点活动连接 {{ connections.items.length }} 条</span>
+            <span v-if="!connections.active">当前设备已停止</span>
+          </div>
+          <p class="connection-hint">
+            TCP 连接属于监听端点。同端口多个 Unit ID
+            可以共用连接；“已访问当前设备”表示该活动连接发送过当前设备的请求，尚未发送请求的连接无法判定目标设备。
+          </p>
+          <div v-if="connections.items.length" class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>主机 IP</th>
+                  <th>主机端口</th>
+                  <th>连接时间 / 时长</th>
+                  <th>最近请求</th>
+                  <th>最近 Unit</th>
+                  <th>当前设备请求</th>
+                  <th>访问状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="c in connections.items" :key="c.id">
+                  <td class="mono">{{ c.host }}</td>
+                  <td>{{ c.port ?? "—" }}</td>
+                  <td>
+                    {{
+                      new Date(c.connected_at * 1000).toLocaleString("zh-CN", {
+                        hourCycle: "h23",
+                      })
+                    }}<span class="cell-note">{{
+                      connectionDuration(c.connected_at)
+                    }}</span>
+                  </td>
+                  <td>
+                    {{ c.last_request ? clock(c.last_request) : "尚未请求" }}
+                  </td>
+                  <td>{{ c.last_unit_id ?? "—" }}</td>
+                  <td>{{ c.device_requests }}</td>
+                  <td>
+                    {{
+                      c.accessed_device
+                        ? "已访问当前设备"
+                        : c.requests
+                          ? "其他 Unit／设备"
+                          : "尚未请求"
+                    }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="empty compact">
+            <h3>暂无活动连接</h3>
+            <p>外部主机连接监听端点后会自动显示，连接断开后移除。</p>
+          </div>
+        </section>
         <section v-if="tab === 'diagnostics'" class="panel">
           <div class="section-title">
             <div>
@@ -2248,7 +2420,7 @@ onUnmounted(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(r, i) in diagnostics" :key="i">
+                <tr v-for="r in diagnostics" :key="diagnosticKey(r)">
                   <td>{{ clock(r.time) }}</td>
                   <td class="mono">{{ r.host }}</td>
                   <td>{{ r.unit_id }}</td>
@@ -2257,15 +2429,18 @@ onUnmounted(() => {
                   <td>{{ r.ms }}ms</td>
                   <td>
                     <button
-                      class="text-button"
-                      @click="expandedLog = expandedLog === r ? null : r"
+                      class="text-button packet-trigger"
+                      aria-haspopup="dialog"
+                      :aria-expanded="
+                        Boolean(
+                          expandedLog &&
+                            diagnosticKey(expandedLog) === diagnosticKey(r),
+                        )
+                      "
+                      @click="openPacket(r, $event)"
                     >
                       {{ r.error || "正常" }} · 报文
                     </button>
-                    <pre v-if="expandedLog === r" class="packet">
-请求 {{ r.request }}
-响应 {{ r.response || "无响应" }}</pre
-                    >
                   </td>
                 </tr>
               </tbody>
@@ -2299,6 +2474,45 @@ onUnmounted(() => {
         </section>
       </template>
     </main>
+    <section
+      id="packet-detail-popover"
+      popover="auto"
+      class="packet-popover"
+      role="dialog"
+      aria-label="报文详情"
+      @toggle="packetToggled"
+      @focusout="packetFocusOut"
+    >
+      <template v-if="expandedLog">
+        <div class="section-title">
+          <h2>报文详情</h2>
+          <button @click="closePacket(true)" aria-label="关闭报文详情">
+            关闭
+          </button>
+        </div>
+        <p>
+          {{
+            new Date(expandedLog.time * 1000).toLocaleString("zh-CN", {
+              hourCycle: "h23",
+            })
+          }}
+          · {{ expandedLog.host }}
+        </p>
+        <p>
+          事务 {{ expandedLog.transaction_id }} · Unit
+          {{ expandedLog.unit_id }} · 功能码 {{ expandedLog.function }} ·
+          {{ expandedLog.ms }}ms<br />结果：{{ expandedLog.error || "正常" }}
+        </p>
+        <h3>请求报文（HEX）</h3>
+        <pre tabindex="0" aria-label="请求报文">{{
+          packetHex(expandedLog.request)
+        }}</pre>
+        <h3>响应报文（HEX）</h3>
+        <pre tabindex="0" aria-label="响应报文">{{
+          packetHex(expandedLog.response)
+        }}</pre>
+      </template>
+    </section>
     <section
       v-if="device"
       id="device-status-popover"
@@ -2415,8 +2629,9 @@ onUnmounted(() => {
       </button>
       <button
         role="menuitem"
-        :disabled="busy || !menuStopped"
-        :title="!menuStopped ? '请先停止设备' : ''"
+        :disabled="
+          busy || !['running', 'stopped', 'fault'].includes(menuDevice?.status)
+        "
         @click="deviceMenuAction('reset')"
       >
         重置全部当前值
@@ -2430,7 +2645,7 @@ onUnmounted(() => {
         删除设备
       </button>
       <span v-if="menuDevice && !menuStopped" class="hint"
-        >重置和删除须先停止设备。</span
+        >可运行中重置；删除设备须先停止。</span
       >
     </div>
     <div v-if="modal" class="drawer-layer" @click.self="closeModal">
@@ -2497,7 +2712,7 @@ onUnmounted(() => {
             <p class="form-note">
               {{
                 device?.status === "running"
-                  ? "设备运行中：名称、初始值和策略可保存；映射、编码及增删点位须先停止设备。"
+                  ? "可运行中保存或增加点位。原布局兼容的点位保留当前值；新增或修改地址、类型、编码的点位使用初始值，通信保持运行。"
                   : "配置保存后生效，初始值只在初始化或重置时应用。"
               }}
             </p>
@@ -2797,10 +3012,34 @@ onUnmounted(() => {
               </p>
             </template>
             <label v-if="draft.strategy.kind === 'expression'"
-              >表达式（t、x0、x1 与四则运算）<input
+              >表达式（t、x0、x1 与算术运算）<input
                 v-model="draft.strategy.params.expression"
-                placeholder="x0 * 0.5 + t" /></label
-            ><label v-if="['sequence', 'replay'].includes(draft.strategy.kind)"
+                placeholder="x0 * 0.5 + t"
+            /></label>
+            <div
+              v-if="draft.strategy.kind === 'expression'"
+              class="hint"
+              aria-label="表达式变量说明"
+            >
+              <p v-for="(id, index) in draft.strategy.dependencies" :key="id">
+                <code>x{{ index }}</code> =
+                {{ deviceConfig.points.find((p: Row) => p.id === id)?.name }}
+                的当前工程值
+              </p>
+              <p v-if="!draft.strategy.dependencies.length">
+                未选择依赖时，可使用常量和 t。
+              </p>
+              <p>
+                t
+                为此点位策略累计运行秒数，停止、暂停或保持时不推进。支持数字、括号与
+                +、-、*、/、%（求余），不支持函数、比较或条件表达式。
+              </p>
+              <p>
+                例：x0 - x1 为两点位之差，(x0 + x1) / 2
+                为平均值。修改依赖后请核对变量对应关系。
+              </p>
+            </div>
+            <label v-if="['sequence', 'replay'].includes(draft.strategy.kind)"
               >样本（序列：持续秒数；回放：时间秒数）<textarea
                 v-model="sampleText"
                 rows="5"

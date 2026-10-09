@@ -125,6 +125,73 @@ async def test_database_locked_does_not_block_modbus(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_online_activation_keeps_writes_received_while_database_waits(tmp_path):
+    storage = Storage(tmp_path)
+    await storage.open()
+    runtime = Runtime()
+    runtime.apply(storage.config)
+    device = Device(
+        id="live", points=[Point(id="old", name="old", initial=3, writable=True)]
+    )
+    await storage.commit(Configuration(devices=[device]), runtime)
+    live = runtime.get(device.id)
+    live.status = "running"
+    current = storage.config.model_copy(deep=True)
+    current.devices[0].points.append(Point(id="new", name="new", address=2, initial=9))
+    blocker = sqlite3.connect(tmp_path / "config.db", timeout=0.1)
+    blocker.execute("BEGIN IMMEDIATE")
+    task = asyncio.create_task(storage.commit(current, runtime))
+    try:
+        while not storage.config_pending:
+            await asyncio.sleep(0)
+        live.write("holding", 0, [77], "external")
+        live.paused = True
+        blocker.rollback()
+        await task
+        activated = runtime.get(device.id)
+        assert activated.value("old") == 77
+        assert (
+            activated.states["old"].hold
+            and activated.states["old"].source == "external"
+        )
+        assert activated.value("new") == 9 and activated.paused
+        assert activated.status == "running"
+    finally:
+        blocker.close()
+        await storage.close(runtime)
+
+
+@pytest.mark.asyncio
+async def test_mapping_preparation_failure_never_persists_or_mutates_live_state(
+    tmp_path, monkeypatch
+):
+    storage = Storage(tmp_path)
+    await storage.open()
+    runtime = Runtime()
+    runtime.apply(storage.config)
+    device = Device(id="live", points=[Point(id="old", name="old", initial=3)])
+    await storage.commit(Configuration(devices=[device]), runtime)
+    live = runtime.get(device.id)
+    live.assign([{"id": "old", "value": 77}])
+    current = storage.config.model_copy(deep=True)
+    current.devices[0].points.append(Point(id="new", name="new", address=2))
+
+    def unavailable(config):
+        raise MemoryError("injected allocation failure")
+
+    monkeypatch.setattr(runtime, "prepare", unavailable)
+    try:
+        with pytest.raises(DomainError, match="配置未保存"):
+            await storage.commit(current, runtime)
+        assert storage.config.version == 1 and not storage.config_pending
+        assert runtime.get(device.id) is live and live.value("old") == 77
+        with closing(sqlite3.connect(tmp_path / "config.db")) as conn:
+            assert conn.execute("SELECT version FROM config").fetchone()[0] == 1
+    finally:
+        await storage.close(runtime)
+
+
+@pytest.mark.asyncio
 async def test_disk_degraded_queue_bound_and_corrupt_snapshot_fallback(tmp_path):
     s = Storage(tmp_path)
     await s.open()

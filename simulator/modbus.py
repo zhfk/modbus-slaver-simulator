@@ -9,6 +9,7 @@ import contextlib
 import random
 import struct
 import time
+import uuid
 
 from contextlib import asynccontextmanager
 
@@ -22,7 +23,7 @@ class Endpoint:
         self.key, self.runtime, self.owner = key, runtime, owner
         self.units = {}
         self.server = None
-        self.clients = set()
+        self.clients = {}
         self.tasks = set()
         self.last_request = None
         self.requests = self.errors = 0
@@ -177,8 +178,18 @@ class Endpoint:
             await writer.wait_closed()
             self.tasks.discard(task)
             return
-        self.clients.add(writer)
         peer = writer.get_extra_info("peername")
+        client = {
+            "id": uuid.uuid4().hex,
+            "host": str(peer[0]) if peer else "未知",
+            "port": peer[1] if peer else None,
+            "connected_at": time.time(),
+            "last_request": None,
+            "last_unit_id": None,
+            "requests": 0,
+            "devices": {},
+        }
+        self.clients[writer] = client
         try:
             while True:
                 configs = [self.runtime.get(key).config for key in self.units.values()]
@@ -199,6 +210,17 @@ class Endpoint:
                 started = time.monotonic()
                 self.last_request, self.requests = time.time(), self.requests + 1
                 key = self.units.get(unit)
+                client["last_request"] = self.last_request
+                client["last_unit_id"] = unit
+                client["requests"] += 1
+                if key is not None:
+                    # At most 256 Unit IDs per TCP connection, including reuse.
+                    visit = client["devices"].get(unit)
+                    if visit is None or visit["device"] != key:
+                        visit = {"device": key, "requests": 0, "last_request": None}
+                        client["devices"][unit] = visit
+                    visit["requests"] += 1
+                    visit["last_request"] = self.last_request
                 response, error = None, None
                 if key is None:
                     error = "未知 Unit ID"
@@ -231,6 +253,7 @@ class Endpoint:
                     self.errors += 1
                 self.runtime.diagnostics.append(
                     {
+                        "id": uuid.uuid4().hex,
                         "time": time.time(),
                         "device": key,
                         "endpoint": f"{self.key[0]}:{self.key[1]}",
@@ -264,7 +287,7 @@ class Endpoint:
         except (asyncio.IncompleteReadError, TimeoutError, ConnectionError, OSError):
             pass
         finally:
-            self.clients.discard(writer)
+            self.clients.pop(writer, None)
             writer.close()
             try:
                 with contextlib.suppress(ConnectionError, OSError, TimeoutError):

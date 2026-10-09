@@ -7,7 +7,7 @@ import random
 import time
 from array import array
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .codec import decode, encode, safe_number, width
 from .errors import DomainError, ProtocolError
@@ -91,26 +91,12 @@ class DeviceRuntime:
                 random.Random(p.strategy.seed), enabled=p.strategy.enabled
             )
             data = encode(p, p.initial)
-            if (
-                previous
-                and p.id in previous.points
-                and previous.points[p.id].layout() == p.layout()
-            ):
-                data = previous.raw(p.id)
-                state = previous.states[p.id]
-                state.enabled = p.strategy.enabled
-                if p.strategy != previous.points[p.id].strategy:
-                    state.rng = random.Random(p.strategy.seed)
-                    state.error = ""
-                self.clock = previous.clock
             self.states[p.id] = state
             self.values[p.area][p.address : p.address + width(p.type)] = array(
                 "H", data
             )
             for a in range(p.address, p.address + width(p.type)):
                 self.owners[p.area][a] = p.id
-        if previous:
-            self.status, self.paused = previous.status, previous.paused
         self.order = self._order()
         self.expressions = {
             p.id: compile(
@@ -121,6 +107,35 @@ class DeviceRuntime:
             for p in config.points
             if p.strategy.kind == "expression"
         }
+        if previous:
+            self.inherit(previous)
+
+    def inherit(self, previous):
+        """Rebase a prepared map on the latest live values without yielding."""
+        self.status, self.paused, self.error = (
+            previous.status,
+            previous.paused,
+            previous.error,
+        )
+        self.clock, self.stamp = previous.clock, previous.stamp
+        self.version, self.last_trend = previous.version + 1, previous.last_trend
+        for key, p in self.points.items():
+            if key in previous.points and previous.points[key].layout() == p.layout():
+                self.states[key] = replace(
+                    previous.states[key], enabled=p.strategy.enabled
+                )
+                if p.strategy != previous.points[key].strategy:
+                    self.states[key].rng = random.Random(p.strategy.seed)
+                    self.states[key].error = ""
+                self.values[p.area][p.address : p.address + width(p.type)] = array(
+                    "H", previous.raw(key)
+                )
+                if key in previous.trends:
+                    self.trends[key] = previous.trends[key]
+            else:
+                # New or remapped strategies start now, not at the device's age.
+                self.states[key].last_clock = self.clock
+                self.states[key].due = self.clock
 
     def _order(self):
         result, todo = (
@@ -257,13 +272,15 @@ class DeviceRuntime:
         self.version += 1
 
     def reset(self):
-        if self.status not in ("stopped", "fault"):
-            raise DomainError("请先停止设备", 409)
+        if self.status not in ("running", "stopped", "fault"):
+            raise DomainError("设备正在切换状态，请稍后重置", 409)
         fresh = DeviceRuntime(self.config)
         self.values, self.states, self.clock = fresh.values, fresh.states, 0
-        self.trends.clear()
+        for cache in self.trends.values():
+            cache.clear()
         self.last_trend, self.stamp = 0, fresh.stamp
-        self.paused, self.error = False, ""
+        self.paused = self.paused if self.status == "running" else False
+        self.error = ""
         self.version += 1
 
     def strategy_value(self, key, values, dt):
@@ -532,17 +549,20 @@ class Runtime:
         self.trend_touch = {}
         self.last_trend_cleanup = 0
 
-    def apply(self, config):
+    def prepare(self, config):
+        return {d.id: DeviceRuntime(d) for d in config.devices}
+
+    def apply(self, config, prepared=None):
         previous = self.devices
-        self.devices = {
-            d.id: DeviceRuntime(d, previous.get(d.id)) for d in config.devices
-        }
-        for device in self.devices.values():
+        candidates = prepared if prepared is not None else self.prepare(config)
+        for key, device in candidates.items():
+            if key in previous:
+                device.inherit(previous[key])
             device.audit_callback = self.audit
+        self.devices = candidates
+        cached = {key for d in self.devices.values() for key in d.trends}
         self.trend_touch = {
-            key: stamp
-            for key, stamp in self.trend_touch.items()
-            if any(key in d.points for d in self.devices.values())
+            key: stamp for key, stamp in self.trend_touch.items() if key in cached
         }
 
     async def run(self):
@@ -554,8 +574,10 @@ class Runtime:
             self.progress = now
             if now - self.last_trend_cleanup >= 1:
                 self.expire_trends(now)
-            for device in list(self.devices.values()):
-                device.tick(time.monotonic())
+            for key in list(self.devices):
+                # A configuration can activate while yielding between devices.
+                if key in self.devices:
+                    self.devices[key].tick(time.monotonic())
                 await asyncio.sleep(0)
             if self.on_tick:
                 self.on_tick()
