@@ -29,8 +29,17 @@ async def run(url, output):
         page.on("pageerror", lambda err: failures.append(str(err)))
         reject_discard = False
         discard_confirmations = []
+        device_confirmations = []
+        reject_delete = False
 
         async def handle_dialog(dialog):
+            if any(
+                word in dialog.message for word in ("停止 ", "删除 ", "的全部点位恢复")
+            ):
+                device_confirmations.append(dialog.message)
+                if reject_delete and dialog.message.startswith("删除 "):
+                    await dialog.dismiss()
+                    return
             if "尚未保存" in dialog.message:
                 discard_confirmations.append(dialog.message)
                 if reject_discard:
@@ -39,6 +48,22 @@ async def run(url, output):
             await dialog.accept()
 
         page.on("dialog", handle_dialog)
+
+        async def open_device_menu(name):
+            card = page.locator(".device-link").filter(has_text=name)
+            if not await card.is_visible():
+                await page.get_by_role(
+                    "button", name="展开设备导航", exact=True
+                ).click()
+            await card.click(button="right")
+            menu = page.get_by_role("menu", name="设备操作", exact=True)
+            await expect(menu).to_be_visible()
+            return menu
+
+        async def device_action(name, command):
+            menu = await open_device_menu(name)
+            await menu.get_by_role("menuitem", name=command, exact=True).click()
+            await expect(menu).to_be_hidden()
 
         async def offline_route(route):
             if urlsplit(route.request.url).netloc != urlsplit(url).netloc:
@@ -146,10 +171,10 @@ async def run(url, output):
         assert await page.evaluate("scrollY") == scroll
         assert not await page.locator("main").evaluate("main => main.inert")
         await page.set_viewport_size({"width": 1440, "height": 1000})
-        await page.get_by_role("button", name="启动设备", exact=True).click()
+        await device_action("验收温控设备", "启动设备")
         await expect(
-            page.get_by_role("button", name="停止设备", exact=True)
-        ).to_be_visible()
+            page.locator(".device-link").filter(has_text="验收温控设备")
+        ).to_contain_text("运行中")
         row = page.get_by_role("row").filter(
             has=page.get_by_role("button", name="目标温度", exact=True)
         )
@@ -159,11 +184,11 @@ async def run(url, output):
         await expect(page.get_by_text("实际值 75.3", exact=False)).to_be_visible()
         await page.get_by_role("button", name="应用当前值", exact=True).click()
         await expect(row.locator(".live-value")).to_contain_text("75.30")
-        await page.get_by_role("button", name="暂停策略", exact=True).click()
+        await device_action("验收温控设备", "暂停策略")
         await expect(
-            page.get_by_role("button", name="恢复策略", exact=True)
-        ).to_be_visible()
-        await page.get_by_role("button", name="恢复策略", exact=True).click()
+            page.locator(".device-link").filter(has_text="验收温控设备")
+        ).to_contain_text("策略暂停")
+        await device_action("验收温控设备", "恢复策略")
         await page.get_by_role("button", name="目标温度", exact=True).click()
         await expect(page.get_by_role("heading", name="编辑点位")).to_be_visible()
         await page.get_by_label("名称", exact=True).fill("目标温度设定")
@@ -233,10 +258,10 @@ async def run(url, output):
         )
         await page.set_viewport_size({"width": 1440, "height": 1000})
         await page.get_by_label("选择当前页全部点位", exact=True).uncheck()
-        await page.get_by_role("button", name="停止设备", exact=True).click()
+        await device_action("验收温控设备", "停止设备")
         await expect(
-            page.get_by_role("button", name="启动设备", exact=True)
-        ).to_be_visible()
+            page.locator(".device-link").filter(has_text="验收温控设备")
+        ).to_contain_text("已停止")
         await page.get_by_role("button", name="新增点位", exact=True).click()
         await page.get_by_label("名称", exact=True).fill("随机测试点")
         await page.get_by_label("策略类型", exact=True).select_option("random")
@@ -352,11 +377,7 @@ async def run(url, output):
         await expect(
             page.get_by_role("heading", name="共享端点第二台", exact=True)
         ).to_be_visible()
-        await (
-            page.locator(".page-header")
-            .get_by_role("button", name="设备设置", exact=True)
-            .click()
-        )
+        await device_action("共享端点第二台", "编辑设备")
         dialog = page.get_by_role("dialog")
         await dialog.get_by_label("Unit ID", exact=True).fill("1")
         before = await (await page.request.get(url + "/api/config")).json()
@@ -391,7 +412,7 @@ async def run(url, output):
         await dialog.get_by_label("周期（秒）", exact=True).fill("4")
         await dialog.get_by_role("button", name="保存配置", exact=True).click()
         await expect(dialog).to_have_count(0)
-        await page.get_by_role("button", name="启动设备", exact=True).click()
+        await device_action("验收温控设备", "启动设备")
         await page.wait_for_timeout(500)
         points = await (
             await page.request.get(
@@ -472,6 +493,168 @@ async def run(url, output):
         await page.get_by_label("写入后行为", exact=True).select_option("control")
         await page.get_by_role("button", name="保存配置", exact=True).click()
         await expect(dialog).to_have_count(0)
+        # Device actions always target the card, even when another device is
+        # selected. A concrete point and history reference exercise reset/delete.
+        candidate = await (await page.request.get(url + "/api/config")).json()
+        second = candidate["devices"][1]
+        second["points"] = [
+            {"id": "context-reset-point", "name": "重置验证", "initial": 12}
+        ]
+        candidate["settings"]["history_points"].append("context-reset-point")
+        response = await page.request.put(url + "/api/config", data=candidate)
+        assert response.status == 200, await response.text()
+        await page.reload()
+        await expect(
+            page.get_by_role("heading", name="验收温控设备", exact=True)
+        ).to_be_visible()
+        start_gate = asyncio.Event()
+
+        async def delayed_start(route):
+            await start_gate.wait()
+            await route.continue_()
+
+        start_url = url + f"/api/devices/{second['id']}/actions/start"
+        await page.route(start_url, delayed_start)
+        try:
+            await device_action("共享端点第二台", "启动设备")
+            menu = await open_device_menu("共享端点第二台")
+            await expect(menu.locator("button:not(:disabled)")).to_have_count(0)
+            await page.keyboard.press("Escape")
+            await expect(menu).to_be_hidden()
+        finally:
+            start_gate.set()
+        await expect(
+            page.locator(".device-link").filter(has_text="共享端点第二台")
+        ).to_contain_text("运行中")
+        await page.unroute(start_url, delayed_start)
+        await expect(
+            page.get_by_role("heading", name="验收温控设备", exact=True)
+        ).to_be_visible()
+        menu = await open_device_menu("共享端点第二台")
+        await expect(
+            menu.get_by_role("menuitem", name="启动设备", exact=True)
+        ).to_be_disabled()
+        await expect(
+            menu.get_by_role("menuitem", name="重置全部当前值", exact=True)
+        ).to_be_disabled()
+        await expect(
+            menu.get_by_role("menuitem", name="删除设备", exact=True)
+        ).to_be_disabled()
+        await page.keyboard.press("Escape")
+        await device_action("共享端点第二台", "停止设备")
+        await expect(
+            page.locator(".device-link").filter(has_text="共享端点第二台")
+        ).to_contain_text("已停止")
+        response = await page.request.post(
+            url + f"/api/devices/{second['id']}/assign",
+            data={"items": [{"id": "context-reset-point", "value": 99}]},
+        )
+        assert response.status == 200
+        menu = await open_device_menu("共享端点第二台")
+        async with page.expect_response(
+            lambda response: (
+                response.url.endswith(f"/api/devices/{second['id']}/actions/reset")
+                and response.request.method == "POST"
+            )
+        ) as reset_response:
+            await menu.get_by_role(
+                "menuitem", name="重置全部当前值", exact=True
+            ).click()
+        assert (await reset_response.value).status == 200
+        await expect(page.get_by_role("status")).to_contain_text("共享端点第二台")
+        value = await (
+            await page.request.get(url + f"/api/devices/{second['id']}/points")
+        ).json()
+        assert value["items"][0]["value"] == 12
+        await device_action("共享端点第二台", "设备设置")
+        await expect(
+            page.get_by_role("heading", name="设备配置", exact=True)
+        ).to_be_visible()
+        assert (
+            await page.locator(".page-header button")
+            .filter(has_text="启动设备")
+            .count()
+            == 0
+        )
+        assert await page.locator(".settings-summary button").count() == 0
+        await device_action("共享端点第二台", "编辑设备")
+        dialog = page.get_by_role("dialog")
+        await dialog.get_by_label("设备名称", exact=True).fill("菜单设备 2#")
+        await dialog.get_by_role("button", name="保存设备配置", exact=True).click()
+        await expect(dialog).to_have_count(0)
+        for width in (1440, 1024, 390):
+            await page.set_viewport_size({"width": width, "height": 844})
+            card = page.locator(".device-link").filter(has_text="菜单设备 2#")
+            if not await card.is_visible():
+                await page.get_by_role(
+                    "button", name="展开设备导航", exact=True
+                ).click()
+            await page.get_by_role(
+                "button", name="菜单设备 2# 的设备操作菜单", exact=True
+            ).click()
+            menu = page.get_by_role("menu", name="设备操作", exact=True)
+            await expect(menu).to_be_visible()
+            bounds = await menu.bounding_box()
+            assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width
+            assert bounds["y"] >= 0 and bounds["y"] + bounds["height"] <= 844
+            await page.screenshot(path=str(output / f"device-menu-{width}.png"))
+            await page.keyboard.press("End")
+            await expect(
+                menu.get_by_role("menuitem", name="删除设备", exact=True)
+            ).to_be_focused()
+            await page.keyboard.press("Home")
+            await expect(
+                menu.get_by_role("menuitem", name="设备设置", exact=True)
+            ).to_be_focused()
+            await page.keyboard.press("ArrowDown")
+            assert (
+                await page.evaluate("document.activeElement.getAttribute('role')")
+                == "menuitem"
+            )
+            await page.keyboard.press("Escape")
+            await expect(card).to_be_focused()
+            await card.press("Shift+F10")
+            await expect(menu).to_be_visible()
+            await page.keyboard.press("ArrowUp")
+            await expect(
+                menu.get_by_role("menuitem", name="删除设备", exact=True)
+            ).to_be_focused()
+            await page.keyboard.press("Escape")
+        await page.set_viewport_size({"width": 1440, "height": 1000})
+        card = page.locator(".device-link").filter(has_text="菜单设备 2#")
+        before = await card.bounding_box()
+        scroll_before = await page.evaluate("scrollY")
+        menu = await open_device_menu("菜单设备 2#")
+        assert await card.bounding_box() == before
+        assert await page.evaluate("scrollY") == scroll_before
+        await page.get_by_role("heading", name="菜单设备 2#", exact=True).click()
+        await expect(menu).to_be_hidden()
+        await open_device_menu("菜单设备 2#")
+        await page.set_viewport_size({"width": 1430, "height": 1000})
+        await expect(menu).to_be_hidden()
+        await page.set_viewport_size({"width": 1430, "height": 500})
+        await open_device_menu("菜单设备 2#")
+        scroll_before = await page.evaluate("scrollY")
+        await page.evaluate("window.scrollBy(0, 30)")
+        await expect(menu).to_be_hidden()
+        assert await page.evaluate("scrollY") > scroll_before
+        await page.set_viewport_size({"width": 1440, "height": 1000})
+        await page.locator(".device-link").filter(has_text="验收温控设备").click()
+        reject_delete = True
+        await device_action("菜单设备 2#", "删除设备")
+        assert "菜单设备 2#" in device_confirmations[-1]
+        assert len((await (await page.request.get(url + "/api/devices")).json())) == 2
+        reject_delete = False
+        await device_action("菜单设备 2#", "删除设备")
+        await expect(
+            page.locator(".device-link").filter(has_text="菜单设备 2#")
+        ).to_have_count(0)
+        saved = await (await page.request.get(url + "/api/config")).json()
+        assert len(saved["devices"]) == 1 and saved["settings"]["history_points"] == []
+        devices = await (await page.request.get(url + "/api/devices")).json()
+        assert (
+            devices[0]["name"] == "验收温控设备" and devices[0]["status"] == "running"
+        )
         assert not failures, failures
         await browser.close()
     report = {
@@ -480,6 +663,10 @@ async def run(url, output):
             "actual read-only storage directory at 1440/1024/390 widths",
             "right drawer preserves workspace width and scroll, locks background and restores focus",
             "device creation",
+            "device context menu controls explicit card target without changing another selected device",
+            "device context menu settings/edit/start/stop/reset/delete, state guards and cancelled deletion",
+            "device menu at 1440/1024/390: trigger/Shift+F10, arrows/Home/End/Escape, unchanged layout, outside/scroll/resize dismissal",
+            "deleting an inactive device clears point/history references and preserves the running device",
             "row menu overlays without changing row height at 1440/1024/390, stays in viewport, dismisses and restores focus",
             "control input can select and save a generated strategy, then runs it",
             "returning to control input clears strategy and extra parameters",

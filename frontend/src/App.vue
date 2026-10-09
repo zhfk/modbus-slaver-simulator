@@ -63,6 +63,15 @@ const addTemplate = ref(true),
   newPort = ref(1502),
   newUnit = ref(1);
 const deviceMemory = new Map<string, Row>();
+const deviceMenuId = ref("");
+const deviceMenuOpen = ref(false);
+const menuDevice = computed(() =>
+  devices.value.find((d) => d.id === deviceMenuId.value),
+);
+const menuStopped = computed(
+  () =>
+    menuDevice.value && ["stopped", "fault"].includes(menuDevice.value.status),
+);
 let trendAnchor: HTMLElement | null = null;
 let scrollLock: { overflow: string; paddingRight: string } | null = null;
 function lockBackground(locked: boolean) {
@@ -417,9 +426,11 @@ async function poll() {
   }
 }
 async function selectDevice(key: string) {
-  if (!(await closeModal())) return;
+  if (!(await closeModal())) return false;
+  closeDeviceMenu();
   deviceId.value = key;
   showNav.value = false;
+  return true;
 }
 watch(deviceId, async (key, previous) => {
   closeTrend();
@@ -479,6 +490,82 @@ function toggleRow(id: string) {
     ? selected.value.filter((k) => k !== id)
     : [...selected.value, id];
 }
+function closeDeviceMenu(returnFocus = false) {
+  const menu = document.getElementById("device-context-menu");
+  if (!menu?.matches(":popover-open")) return;
+  menu.hidePopover();
+  if (returnFocus)
+    document
+      .getElementById(`device-card-${deviceMenuId.value}`)
+      ?.focus({ preventScroll: true });
+}
+async function openDeviceMenu(event: MouseEvent | KeyboardEvent, key: string) {
+  event.preventDefault();
+  closeDeviceMenu();
+  closeTrend();
+  closeRowMenus();
+  deviceMenuId.value = key;
+  await nextTick();
+  const menu = document.getElementById("device-context-menu");
+  const card = document.getElementById(`device-card-${key}`);
+  if (!menu || !card) return;
+  card.focus({ preventScroll: true });
+  menu.showPopover();
+  const anchor = card.getBoundingClientRect(),
+    size = menu.getBoundingClientRect();
+  const pointer = event instanceof MouseEvent && event.type === "contextmenu";
+  const x = pointer ? event.clientX : anchor.right;
+  const y = pointer ? event.clientY : anchor.top;
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - size.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - size.height - 8))}px`;
+  menu
+    .querySelector<HTMLElement>("button:not(:disabled)")
+    ?.focus({ preventScroll: true });
+}
+function deviceMenuKeyboard(event: KeyboardEvent) {
+  const items = [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      "#device-context-menu button:not(:disabled)",
+    ),
+  ];
+  const index = items.indexOf(document.activeElement as HTMLButtonElement);
+  if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+    event.preventDefault();
+    const next =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? items.length - 1
+          : (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) %
+            items.length;
+    items[next]?.focus();
+  } else if (event.key === "Tab") closeDeviceMenu();
+}
+function dismissDeviceMenu(event: PointerEvent) {
+  if (
+    event.target instanceof Element &&
+    event.target.closest(".device-context-menu, .device-menu-trigger")
+  )
+    return;
+  closeDeviceMenu();
+}
+async function deviceMenuAction(kind: string) {
+  const key = deviceMenuId.value;
+  if (!menuDevice.value || busy.value) return;
+  closeDeviceMenu(true);
+  if (["settings", "edit"].includes(kind)) {
+    if (!(await selectDevice(key))) return;
+    if (kind === "settings") tab.value = "settings";
+    else {
+      if (innerWidth <= 1050)
+        document
+          .querySelector<HTMLElement>(".mobile-nav")
+          ?.focus({ preventScroll: true });
+      await editDevice();
+    }
+  } else if (kind === "delete") await removeDevice(key);
+  else await deviceAction(kind, key);
+}
 function closeRowMenus(returnFocus = false) {
   for (const menu of document.querySelectorAll<HTMLElement>(
     ".point-menu:popover-open",
@@ -492,6 +579,7 @@ function closeRowMenus(returnFocus = false) {
 }
 function positionRowMenu(event: Event, id: string) {
   if ((event as ToggleEvent).newState !== "open") return;
+  closeDeviceMenu();
   const menu = event.target as HTMLElement;
   const trigger = document.getElementById(`point-more-${id}`);
   if (!trigger) return;
@@ -511,15 +599,17 @@ function placePopover(menu: HTMLElement, trigger: HTMLElement) {
 function dismissRowMenus(event: Event) {
   if (
     event.target instanceof Element &&
-    event.target.closest(".point-menu, .trend-popover")
+    event.target.closest(".point-menu, .trend-popover, .device-context-menu")
   )
     return;
   closeRowMenus();
   closeTrend();
+  closeDeviceMenu();
 }
 async function openModal(kind: string) {
   if (!(await closeModal())) return false;
   closeTrend();
+  closeDeviceMenu(true);
   closeRowMenus(true);
   focusReturn = document.activeElement as HTMLElement;
   modal.value = kind;
@@ -546,6 +636,14 @@ async function closeModal() {
   return true;
 }
 function keydown(e: KeyboardEvent) {
+  if (
+    e.key === "Escape" &&
+    document.getElementById("device-context-menu")?.matches(":popover-open")
+  ) {
+    e.preventDefault();
+    closeDeviceMenu(true);
+    return;
+  }
   if (!modal.value) return;
   if (e.key === "Escape") {
     e.preventDefault();
@@ -577,32 +675,31 @@ async function saveConfig(candidate: Row) {
   await loadPoints();
   notice.value = `配置版本 ${config.value.version} 已保存并生效`;
 }
-async function deviceAction(kind: string) {
-  if (!device.value) return;
+async function deviceAction(kind: string, key = deviceId.value) {
+  const target = devices.value.find((d) => d.id === key);
+  if (!target) return;
   if (
     kind === "stop" &&
-    !confirm(
-      `停止 ${device.value.name} 后该设备不再响应 Modbus 请求，是否继续？`,
-    )
+    !confirm(`停止 ${target.name} 后该设备不再响应 Modbus 请求，是否继续？`)
   )
     return;
   if (
     kind === "reset" &&
-    !confirm("将全部点位恢复初始值并清除保持状态，是否继续？")
+    !confirm(`将 ${target.name} 的全部点位恢复初始值并清除保持状态，是否继续？`)
   )
     return;
   await action(async () => {
-    await request(`/api/devices/${deviceId.value}/actions/${kind}`, {
+    await request(`/api/devices/${key}/actions/${kind}`, {
       method: "POST",
     });
     await refreshDevices();
     await loadPoints();
     notice.value =
       kind === "pause"
-        ? "已暂停策略，Modbus 仍可读写"
+        ? `${target.name} 已暂停策略，Modbus 仍可读写`
         : kind === "resume"
-          ? "已恢复设备策略，点位手动保持仍需单独恢复"
-          : "设备操作已完成";
+          ? `${target.name} 已恢复设备策略，点位手动保持仍需单独恢复`
+          : `${target.name} 的设备操作已完成`;
   });
 }
 function validateDeviceEndpoint(
@@ -693,19 +790,15 @@ async function saveDevice() {
     modal.value = "";
   });
 }
-async function removeDevice() {
-  if (
-    !confirm(
-      `删除 ${device.value?.name} 及全部点位和依赖配置？必须先停止设备。`,
-    )
-  )
+async function removeDevice(key = deviceId.value) {
+  const target = config.value.devices.find((d: Row) => d.id === key);
+  if (!target) return;
+  if (!confirm(`删除 ${target.name} 及全部点位和依赖配置？必须先停止设备。`))
     return;
   await action(async () => {
     const candidate = clone(config.value);
-    const ids = new Set(deviceConfig.value.points.map((p: Row) => p.id));
-    candidate.devices = candidate.devices.filter(
-      (d: Row) => d.id !== deviceId.value,
-    );
+    const ids = new Set(target.points.map((p: Row) => p.id));
+    candidate.devices = candidate.devices.filter((d: Row) => d.id !== key);
     candidate.settings.history_points =
       candidate.settings.history_points.filter((id: string) => !ids.has(id));
     await saveConfig(candidate);
@@ -1062,6 +1155,7 @@ async function exportData(kind: string) {
   });
 }
 async function viewTrend(point: Row) {
+  closeDeviceMenu();
   trendKeys.value = [point.id];
   trendData.value = {};
   pauseChart.value = false;
@@ -1172,6 +1266,7 @@ async function copyEndpoint() {
 }
 onMounted(async () => {
   document.addEventListener("keydown", keydown);
+  document.addEventListener("pointerdown", dismissDeviceMenu);
   document.addEventListener("scroll", dismissRowMenus, true);
   window.addEventListener("resize", dismissRowMenus);
   try {
@@ -1190,6 +1285,7 @@ onUnmounted(() => {
   clearInterval(timer);
   socket?.close();
   document.removeEventListener("keydown", keydown);
+  document.removeEventListener("pointerdown", dismissDeviceMenu);
   document.removeEventListener("scroll", dismissRowMenus, true);
   window.removeEventListener("resize", dismissRowMenus);
 });
@@ -1207,19 +1303,41 @@ onUnmounted(() => {
         ><button aria-label="新建设备" @click="openModal('new')">＋</button>
       </div>
       <nav aria-label="设备列表">
-        <button
+        <div
           v-for="d in devices"
           :key="d.id"
-          class="device-link"
-          :class="{ active: d.id === deviceId }"
-          @click="selectDevice(d.id)"
+          class="device-card"
+          @contextmenu="openDeviceMenu($event, d.id)"
         >
-          <strong>{{ d.name }}</strong
-          ><span
-            >{{ statusNames[d.status]
-            }}<template v-if="d.paused"> · 策略暂停</template></span
-          ><small>{{ d.host }}:{{ d.port }} / {{ d.unit_id }}</small>
-        </button>
+          <button
+            :id="`device-card-${d.id}`"
+            class="device-link"
+            :class="{ active: d.id === deviceId }"
+            aria-haspopup="menu"
+            :aria-expanded="deviceMenuOpen && deviceMenuId === d.id"
+            @click="selectDevice(d.id)"
+            @keydown="
+              ($event.key === 'ContextMenu' ||
+                ($event.shiftKey && $event.key === 'F10')) &&
+              openDeviceMenu($event, d.id)
+            "
+          >
+            <strong>{{ d.name }}</strong
+            ><span
+              >{{ statusNames[d.status]
+              }}<template v-if="d.paused"> · 策略暂停</template></span
+            ><small>{{ d.host }}:{{ d.port }} / {{ d.unit_id }}</small>
+          </button>
+          <button
+            class="device-menu-trigger"
+            :aria-label="`${d.name} 的设备操作菜单`"
+            aria-haspopup="menu"
+            :aria-expanded="deviceMenuOpen && deviceMenuId === d.id"
+            @click="openDeviceMenu($event, d.id)"
+          >
+            ⋯
+          </button>
+        </div>
       </nav>
       <div class="sidebar-bottom">
         <button @click="openStorage">存储与恢复设置</button
@@ -1245,24 +1363,6 @@ onUnmounted(() => {
           >
             {{ device.host }}:{{ device.port }}
             <span>Unit {{ device.unit_id }}</span>
-          </button>
-        </div>
-        <div v-if="device" class="header-actions">
-          <button @click="editDevice">设备设置</button
-          ><button
-            v-if="device.status === 'running'"
-            :disabled="busy"
-            @click="deviceAction(device.paused ? 'resume' : 'pause')"
-          >
-            {{ device.paused ? "恢复策略" : "暂停策略" }}</button
-          ><button
-            class="primary"
-            :disabled="busy || ['starting', 'stopping'].includes(device.status)"
-            @click="
-              deviceAction(device.status === 'running' ? 'stop' : 'start')
-            "
-          >
-            {{ device.status === "running" ? "停止设备" : "启动设备" }}
           </button>
         </div>
       </header>
@@ -1345,12 +1445,7 @@ onUnmounted(() => {
               poll();
             "
           >
-            通信诊断</button
-          ><button
-            :class="{ active: tab === 'settings' }"
-            @click="tab = 'settings'"
-          >
-            设备设置
+            通信诊断
           </button>
         </nav>
         <section v-if="tab === 'monitor'" class="panel monitor-panel">
@@ -1735,19 +1830,78 @@ onUnmounted(() => {
               }}
             </dd>
           </dl>
-          <div class="button-row">
-            <button @click="editDevice">编辑设备配置</button
-            ><button
-              :disabled="device.status === 'running'"
-              :title="device.status === 'running' ? '请先停止设备' : ''"
-              @click="deviceAction('reset')"
-            >
-              重置全部当前值</button
-            ><button @click="removeDevice">删除设备</button>
-          </div>
         </section>
       </template>
     </main>
+    <!-- Manual dismissal prevents the opening right-button release from closing the menu. -->
+    <div
+      id="device-context-menu"
+      popover="manual"
+      class="device-context-menu"
+      role="menu"
+      aria-label="设备操作"
+      @keydown="deviceMenuKeyboard"
+      @toggle="deviceMenuOpen = ($event as ToggleEvent).newState === 'open'"
+    >
+      <strong>{{ menuDevice?.name }}</strong>
+      <span class="hint">{{
+        menuDevice ? statusNames[menuDevice.status] : ""
+      }}</span>
+      <button
+        role="menuitem"
+        :disabled="busy || !menuDevice"
+        @click="deviceMenuAction('settings')"
+      >
+        设备设置
+      </button>
+      <button
+        role="menuitem"
+        :disabled="busy || !menuStopped"
+        @click="deviceMenuAction('start')"
+      >
+        启动设备
+      </button>
+      <button
+        role="menuitem"
+        :disabled="busy || menuDevice?.status !== 'running'"
+        @click="deviceMenuAction('stop')"
+      >
+        停止设备
+      </button>
+      <button
+        role="menuitem"
+        :disabled="busy || !menuDevice"
+        @click="deviceMenuAction('edit')"
+      >
+        编辑设备
+      </button>
+      <button
+        role="menuitem"
+        :disabled="busy || menuDevice?.status !== 'running'"
+        @click="deviceMenuAction(menuDevice?.paused ? 'resume' : 'pause')"
+      >
+        {{ menuDevice?.paused ? "恢复策略" : "暂停策略" }}
+      </button>
+      <button
+        role="menuitem"
+        :disabled="busy || !menuStopped"
+        :title="!menuStopped ? '请先停止设备' : ''"
+        @click="deviceMenuAction('reset')"
+      >
+        重置全部当前值
+      </button>
+      <button
+        role="menuitem"
+        :disabled="busy || !menuStopped"
+        :title="!menuStopped ? '请先停止设备' : ''"
+        @click="deviceMenuAction('delete')"
+      >
+        删除设备
+      </button>
+      <span v-if="menuDevice && !menuStopped" class="hint"
+        >重置和删除须先停止设备。</span
+      >
+    </div>
     <div v-if="modal" class="drawer-layer" @click.self="closeModal">
       <section
         class="drawer"

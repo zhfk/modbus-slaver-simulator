@@ -156,6 +156,19 @@ pre {
   min-width: 40px;
   padding: 2px;
 }
+.device-card {
+  position: relative;
+}
+.device-menu-trigger {
+  position: absolute;
+  right: 5px;
+  top: 6px;
+  min-height: 32px;
+  width: 32px;
+  padding: 0;
+  border-color: transparent;
+  font-size: 22px;
+}
 .device-link {
   width: 100%;
   text-align: left;
@@ -164,7 +177,7 @@ pre {
   flex-direction: column;
   gap: 2px;
   margin: 8px 0;
-  padding: 12px;
+  padding: 12px 38px 12px 12px;
 }
 .device-link.active {
   border-color: var(--ink);
@@ -224,7 +237,6 @@ pre {
   margin-left: 15px;
   color: var(--secondary);
 }
-.header-actions,
 .button-row {
   display: flex;
   align-items: center;
@@ -378,7 +390,8 @@ pre {
   margin-left: 5px;
 }
 .point-menu,
-.trend-popover {
+.trend-popover,
+.device-context-menu {
   position: fixed;
   inset: auto;
   margin: 0;
@@ -396,6 +409,24 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+.device-context-menu:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.device-context-menu > strong,
+.device-context-menu > span {
+  padding: 4px 10px;
+  overflow-wrap: anywhere;
+}
+.device-context-menu button {
+  text-align: left;
+  border-color: transparent;
+  flex-shrink: 0;
+}
+.device-context-menu button:hover:not(:disabled) {
+  border-color: var(--ink);
 }
 .point-menu button {
   border-color: transparent;
@@ -744,9 +775,6 @@ tr.selected > td:first-child {
     align-items: flex-start;
     flex-wrap: wrap;
   }
-  .header-actions {
-    margin-left: auto;
-  }
   .toolbar-actions {
     margin-left: 0;
   }
@@ -782,15 +810,6 @@ tr.selected > td:first-child {
   }
   .page-header {
     gap: 12px;
-  }
-  .header-actions {
-    margin-left: 0;
-    width: 100%;
-    gap: 6px;
-  }
-  .header-actions button {
-    flex: 1;
-    padding: 7px 8px;
   }
   .eyebrow {
     display: block;
