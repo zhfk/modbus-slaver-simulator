@@ -13,7 +13,8 @@ from pydantic import ValidationError
 from .models import Configuration, uid
 from .errors import DomainError
 from .files import directory_bytes
-from .point_excel import parse_points, write_template
+from .point_excel import freeze_header, parse_points, write_template
+from .point_table import write_point_table
 
 DEVICE_COLUMNS = {
     "设备 ID": "id",
@@ -82,8 +83,10 @@ def write_workbook(payload, destination):
     meta = wb.active
     if payload.get("kind") == "template":
         write_template(wb)
-        meta.freeze_panes = "A2"
-        meta.auto_filter.ref = "A1:N1"
+        wb.save(destination)
+        return {"path": str(destination)}
+    if payload.get("kind") == "point-table":
+        write_point_table(wb, payload["devices"])
         wb.save(destination)
         return {"path": str(destination)}
     meta.title = "格式"
@@ -139,7 +142,7 @@ def write_workbook(payload, destination):
             )
     for ws in wb:
         text_cells(ws)
-        ws.freeze_panes = "A2"
+        freeze_header(ws)
         ws.auto_filter.ref = ws.dimensions
     wb.save(destination)
     return {"path": str(destination)}

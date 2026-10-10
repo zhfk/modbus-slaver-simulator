@@ -5,7 +5,8 @@ import math
 import random
 
 from openpyxl.comments import Comment
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.worksheet.views import Selection
 from openpyxl.worksheet.datavalidation import DataValidation
 from pydantic import ValidationError
 
@@ -51,10 +52,22 @@ LIMITS = {
 }
 
 
+def freeze_header(ws):
+    ws.freeze_panes = "A2"
+    # openpyxl otherwise leaves A1 selected in the bottom pane. Excel/WPS
+    # can scroll it back to row 1 and display the frozen header twice.
+    ws.sheet_view.topLeftCell = "A1"
+    ws.sheet_view.selection = [
+        Selection(pane="bottomLeft", activeCell="A2", sqref="A2")
+    ]
+
+
 def write_template(wb):
     ws = wb.active
     ws.title = "点位"
     ws.append(list(COLUMNS))
+    ws.row_dimensions[1].height = 26
+    ws.row_dimensions[2].height = 24
     notes = {
         "设备 ID": "必填；从设备卡片菜单的设备信息顶部复制已有设备 ID，每行填写对应设备 ID。",
         "名称": "必填；同一设备按名称精确匹配，存在则更新并保留 ID，不存在则自动生成 ID 新增。",
@@ -75,9 +88,32 @@ def write_template(wb):
         cell.comment = Comment(notes[cell.value], "Modbus Simulator")
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="245C86")
+        cell.alignment = Alignment(vertical="center", wrap_text=False)
         ws.column_dimensions[cell.column_letter].width = (
             24 if cell.value in ("设备 ID", "名称") else 16
         )
+        # Give the first editable row explicit formats. Column defaults cover
+        # later rows, while Excel/WPS also see a real input range on opening.
+        number_format = (
+            "@"
+            if COLUMNS[cell.value]
+            in (
+                "device_id",
+                "name",
+                "group",
+                "area",
+                "type",
+                "unit",
+                "writable",
+                "kind",
+            )
+            else "General"
+        )
+        ws.column_dimensions[cell.column_letter].number_format = number_format
+        entry = ws.cell(2, cell.column)
+        entry.number_format = number_format
+        entry.alignment = Alignment(vertical="center")
+        entry.fill = PatternFill("solid", fgColor="F5F7FA")
     for header, choices in {
         "数据区": list(AREAS),
         "类型": ["Bool", *LIMITS],
@@ -86,8 +122,14 @@ def write_template(wb):
     }.items():
         col = ws.cell(1, list(COLUMNS).index(header) + 1).column_letter
         rule = DataValidation(
-            type="list", formula1='"' + ",".join(choices) + '"', allow_blank=True
+            type="list",
+            formula1='"' + ",".join(choices) + '"',
+            allow_blank=True,
+            showDropDown=False,
+            showInputMessage=True,
         )
+        rule.promptTitle = header
+        rule.prompt = "从第 2 行开始填写，点击单元格右侧箭头选择：" + "、".join(choices)
         rule.errorTitle, rule.error = (
             "请选择下拉选项",
             "请输入列表中的值，后台会再次校验。",
@@ -95,7 +137,7 @@ def write_template(wb):
         rule.showErrorMessage, rule.errorStyle = True, "stop"
         ws.add_data_validation(rule)
         rule.add(f"{col}2:{col}10001")
-    ws.column_dimensions["A"].number_format = "@"
+    freeze_header(ws)
 
 
 class CellError(ValueError):

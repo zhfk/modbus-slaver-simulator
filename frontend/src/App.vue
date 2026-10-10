@@ -2255,6 +2255,8 @@ onUnmounted(() => {
                       ? "已选 " + selected.length + " 个点位"
                       : "当前设备全部点位"
                   }}</strong
+                  ><button @click="exportData('point-table')">
+                    导出 Modbus 点表</button
                   ><button @click="exportData('config')">
                     导出配置（含依赖）</button
                   ><button @click="exportData('snapshot')">导出当前快照</button
@@ -2923,8 +2925,20 @@ onUnmounted(() => {
                 {{ f }} · {{ functionDescriptions[f] }}
               </div>
             </dd>
-            <dt>重启自动启动</dt>
+            <dt>无记录时自动启动</dt>
             <dd>{{ deviceConfig.auto_start ? "已开启" : "关闭" }}</dd>
+            <dt>重启恢复状态</dt>
+            <dd>
+              {{
+                device?.restart_state
+                  ? device.restart_state.running
+                    ? device.restart_state.paused
+                      ? "运行，策略暂停"
+                      : "运行"
+                    : "停止"
+                  : "无记录，按自动启动设置处理"
+              }}
+            </dd>
           </dl>
           <h3>设备身份</h3>
           <dl>
@@ -3710,8 +3724,11 @@ onUnmounted(() => {
               ><input
                 type="checkbox"
                 v-model="draft.auto_start"
-              />进程重启后自动启动此设备</label
+              />无状态记录时自动启动此设备</label
             >
+            <p class="muted">
+              启动、停止及策略暂停状态会自动保存，重启后优先恢复最近保存的状态。当前值按存储设置的快照恢复。
+            </p>
             <h3>设备身份</h3>
             <label
               ><input

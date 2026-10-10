@@ -101,6 +101,7 @@ def create_app(data_dir=None, static_dir=None):
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         await storage.open()
+        modbus.persist_state = storage.remember_device
         runtime.apply(storage.config)
         await storage.restore(runtime)
         heavy = HeavyTasks(
@@ -115,9 +116,16 @@ def create_app(data_dir=None, static_dir=None):
         ]
         runtime.task = context["tasks"][0]
         for device in storage.config.devices:
-            if device.auto_start and not storage.error:
-                with contextlib.suppress(DomainError):
-                    await modbus.start(device.id)
+            remembered = storage.restart_state(device)
+            if remembered:
+                runtime.get(device.id).paused = remembered["paused"]
+            if (
+                remembered["running"] if remembered else device.auto_start
+            ) and not storage.error:
+                try:
+                    await modbus.start(device.id, persist=remembered is None)
+                except DomainError as exc:
+                    logger.warning("设备重启恢复失败：%s；%s", device.name, exc.message)
         logger.info("应用启动；配置版本 %s", storage.config.version)
         try:
             yield
@@ -223,6 +231,7 @@ def create_app(data_dir=None, static_dir=None):
             "name": device.config.name,
             "status": device.status,
             "paused": device.paused,
+            "restart_state": storage().restart_state(device.config),
             "error": device.error,
             "host": device.config.host,
             "port": device.config.port,
@@ -332,11 +341,8 @@ def create_app(data_dir=None, static_dir=None):
             elif action == "stop":
                 await modbus.stop(key)
             elif action in ("pause", "resume"):
-                if device.status != "running":
-                    raise DomainError("设备尚未运行", 409)
-                device.paused = action == "pause"
-                device.stamp = time.monotonic()
-                runtime.event(action, key, "暂停策略" if device.paused else "恢复策略")
+                await modbus.pause(key, action == "pause")
+                device = runtime.get(key)
             elif action == "reset":
                 device.reset()
                 runtime.event(action, key, "恢复初始值")
@@ -370,6 +376,7 @@ def create_app(data_dir=None, static_dir=None):
                     device = runtime.get(key)
                     item.update(device_view(device))
                     if device.status == ("running" if action == "start" else "stopped"):
+                        item.update(await device_action(key, action))
                         item.update(outcome="skipped", message="已处于目标状态")
                     else:
                         item.update(await device_action(key, action))
@@ -789,7 +796,7 @@ def create_app(data_dir=None, static_dir=None):
     async def export(
         kind: str, device: str = "", ids: str = "", start: float = 0, end: float = 0
     ):
-        if kind not in ("config", "snapshot", "history", "template"):
+        if kind not in ("config", "snapshot", "history", "template", "point-table"):
             raise DomainError("导出类型不存在", 404)
         selected = set(ids.split(",")) if ids else None
         config = storage().config.model_dump()

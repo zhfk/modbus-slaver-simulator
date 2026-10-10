@@ -65,29 +65,37 @@ def run(target):
                 assert history[1]["changes"][0]["after"] == 75.25
             finally:
                 client.close()
+            # Freeze generation while checking that a compatible import retains the value.
+            assert http.post(f"/api/devices/{key}/actions/pause").status_code == 200
+            table = http.get(f"/api/export/point-table?device={key}")
+            assert table.status_code == 200
+            book = load_workbook(BytesIO(table.content))
+            assert book.sheetnames == ["Modbus点表"]
+            assert book.active.max_row == len(rows) + 1
+            book.close()
             template = http.get("/api/export/template")
             assert template.status_code == 200
             wb = load_workbook(BytesIO(template.content))
             assert wb.sheetnames == ["点位"] and wb["点位"].max_column == 14
             assert len(wb["点位"].data_validations.dataValidation) == 4
-            wb["点位"].append(
-                [
-                    key,
-                    rows[1]["name"],
-                    "",
-                    "保持寄存器",
-                    0,
-                    "Float32",
-                    1,
-                    0,
-                    "℃",
-                    20,
-                    "是",
-                    "均匀随机",
-                    100,
-                    0,
-                ]
-            )
+            values = [
+                key,
+                rows[1]["name"],
+                "",
+                "保持寄存器",
+                0,
+                "Float32",
+                1,
+                0,
+                "℃",
+                20,
+                "是",
+                "均匀随机",
+                100,
+                0,
+            ]
+            for col, value in enumerate(values, 1):
+                wb["点位"].cell(2, col, value)
             stream = BytesIO()
             wb.save(stream)
             wb.close()

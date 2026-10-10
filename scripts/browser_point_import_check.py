@@ -45,7 +45,7 @@ async def check_point_import(page, url, output):
     panel = page.get_by_role("region", name="设备信息", exact=True)
     await expect(panel).to_be_visible()
     fields = await panel.locator("dt").all_text_contents()
-    assert fields[0] == "设备 ID" and len(fields) == 22, fields
+    assert fields[0] == "设备 ID" and len(fields) == 23, fields
     await expect(panel.locator("dd").first.locator("code")).to_have_text(d.id)
     await expect(panel).to_contain_text("第二行")
     await expect(panel).to_contain_text("写多个保持寄存器")
@@ -97,8 +97,13 @@ async def check_point_import(page, url, output):
                 "类型": "Bool",
             },
         ]
-        for row in rows:
-            ws.append([row.get(c) for c in COLUMNS])
+        assert ws.auto_filter.ref is None
+        assert ws.sheet_view.selection[0].activeCell == "A2"
+        assert all(c.value is None for c in ws[2])
+        assert all(not rule.showDropDown for rule in ws.data_validations.dataValidation)
+        for index, row in enumerate(rows, 2):
+            for col, header in enumerate(COLUMNS, 1):
+                ws.cell(index, col, row.get(header))
         wb.save(path)
         wb.close()
         feedback = drawer.get_by_role("status", name="操作提示", exact=True)
@@ -137,11 +142,30 @@ async def check_point_import(page, url, output):
         )
         await expect(editor.get_by_label("最大值", exact=True)).to_have_value("1")
         await page.keyboard.press("Escape")
+        await (
+            page.locator("details.menu summary").filter(has_text="导出 / 更多").click()
+        )
+        async with page.expect_download() as download_info:
+            await page.get_by_role(
+                "button", name="导出 Modbus 点表", exact=True
+            ).click()
+        path = output / "modbus-point-table.xlsx"
+        await (await download_info.value).save_as(str(path))
+        wb = load_workbook(path)
+        assert wb.sheetnames == ["Modbus点表"] and wb.active.max_row == 4
+        assert wb.active["L2"].value == "000001"
+        assert wb.active["L3"].value == "400001"
+        assert wb.active["M3"].value == 2
+        wb.close()
+        await (
+            page.locator("details.menu summary").filter(has_text="导出 / 更多").click()
+        )
     finally:
         protocol.close()
         await page.request.post(url + f"/api/devices/{d.id}/actions/stop")
     return [
-        "device information renders all 22 information fields, selectable ID first, Chinese meanings at 1440/1024/390 without horizontal overflow",
+        "device information renders all 23 information fields, selectable ID first, Chinese meanings at 1440/1024/390 without horizontal overflow",
         "real UI downloads one-sheet 14-column template with dropdowns, live name upsert retains stable ID/current held value/unlisted point and existing TCP connection",
         "Boolean point default random strategy imports as 0/1 and reopens correctly in editor",
+        "real UI downloads single-sheet Modbus address map with zero-based addresses, references, encoding and permissions",
     ]

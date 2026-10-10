@@ -325,6 +325,7 @@ class ModbusService:
         self.runtime = runtime
         self.endpoints = {}
         self.lock = asyncio.Lock()
+        self.persist_state = None
 
     @asynccontextmanager
     async def limited_lock(self):
@@ -341,10 +342,12 @@ class ModbusService:
     def connections(self):
         return sum(len(e.clients) for e in self.endpoints.values())
 
-    async def start(self, key):
+    async def start(self, key, *, persist=True):
         async with self.limited_lock():
             device = self.runtime.get(key)
             if device.status == "running":
+                if persist and self.persist_state:
+                    await self.persist_state(device, True, device.paused)
                 return
             if device.status in ("starting", "stopping"):
                 raise DomainError("设备状态过渡中", 409)
@@ -359,20 +362,33 @@ class ModbusService:
                     self.endpoints[endpoint_key] = endpoint
                 else:
                     endpoint.units[device.config.unit_id] = key
+                if persist and self.persist_state:
+                    await self.persist_state(device, True, device.paused)
                 device.status, device.stamp = "running", time.monotonic()
                 self.runtime.event("start", key, "设备已启动")
-            except OSError as exc:
+            except (OSError, DomainError, asyncio.CancelledError) as exc:
                 if endpoint:
-                    await endpoint.close()
+                    endpoint.units.pop(device.config.unit_id, None)
+                    if not endpoint.units:
+                        self.endpoints.pop(endpoint_key, None)
+                        await endpoint.close()
                 device.status, device.error = "fault", str(exc)
                 self.runtime.event("start_failed", key, str(exc))
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+                if isinstance(exc, DomainError):
+                    raise
                 raise DomainError(
                     f"监听失败，请检查端口占用、IP 与权限：{exc}", 409
                 ) from exc
 
-    async def stop(self, key):
+    async def stop(self, key, *, persist=True):
         async with self.limited_lock():
             device = self.runtime.get(key)
+            if device.status == "stopped":
+                if persist and self.persist_state:
+                    await self.persist_state(device, False, device.paused)
+                return
             device.status = "stopping"
             endpoint_key = (device.config.host, device.config.port)
             endpoint = self.endpoints.get(endpoint_key)
@@ -381,12 +397,38 @@ class ModbusService:
                 if not endpoint.units:
                     self.endpoints.pop(endpoint_key, None)
                     await endpoint.close()
-            device.status = "stopped"
-            self.runtime.event("stop", key, "设备已停止")
+            try:
+                if persist and self.persist_state:
+                    await self.persist_state(device, False, device.paused)
+                device.error = ""
+            except DomainError as exc:
+                device.error = "通信已停止；" + exc.message
+                raise DomainError(device.error, exc.status) from exc
+            finally:
+                device.status = "stopped"
+                self.runtime.event("stop", key, "设备已停止")
+
+    async def pause(self, key, paused):
+        async with self.limited_lock():
+            device = self.runtime.get(key)
+            if device.status != "running":
+                raise DomainError("设备尚未运行", 409)
+            if self.persist_state:
+                await self.persist_state(device, True, paused)
+            # Online metadata/point changes may replace the runtime while the
+            # database write awaits. Apply pause to the current map.
+            device = self.runtime.get(key)
+            device.paused, device.stamp = paused, time.monotonic()
+            self.runtime.event(
+                "pause" if paused else "resume",
+                key,
+                "暂停策略" if paused else "恢复策略",
+            )
 
     async def close(self):
         for key in list(self.runtime.devices):
-            await self.stop(key)
+            # Closing listeners is process cleanup, not a user stop command.
+            await self.stop(key, persist=False)
 
     def metrics(self):
         return [

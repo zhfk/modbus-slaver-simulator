@@ -204,6 +204,7 @@ class DatabaseWorker:
 
 CONFIG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS device_state (device TEXT PRIMARY KEY, endpoint TEXT NOT NULL, running INTEGER NOT NULL CHECK(running IN (0,1)), paused INTEGER NOT NULL CHECK(paused IN (0,1)));
 PRAGMA user_version=1;
 """
 TELEMETRY_SCHEMA = """
@@ -236,6 +237,8 @@ class Storage:
         self.assignment_pruned = 0
         self.last_snapshot = self.last_backup = 0
         self.restore_report = {}
+        self.restart_states = {}
+        self.restart_error = ""
         self.last_history = self.last_cleanup = 0
         self.flush_task = None
         self.config_pending = False
@@ -258,6 +261,27 @@ class Storage:
                 self.config = Configuration.model_validate_json(
                     row[0], context={"allow_legacy_endpoint_overlap": True}
                 )
+            states = await self.config_db.call(
+                lambda c: c.execute(
+                    "SELECT device,endpoint,running,paused FROM device_state LIMIT 17"
+                ).fetchall()
+            )
+            if len(states) > 16:
+                raise ValueError("设备恢复状态超过 16 台设备限制")
+            for key, endpoint, running, paused in states:
+                if (
+                    type(running) is not int
+                    or running not in (0, 1)
+                    or type(paused) is not int
+                    or paused not in (0, 1)
+                ):
+                    raise ValueError("设备恢复状态损坏")
+                self.restart_states[key] = {
+                    "endpoint": endpoint,
+                    "running": bool(running),
+                    "paused": bool(paused),
+                }
+            self.prune_restart_states()
         except Exception as exc:
             self.error = str(exc)
         # A damaged optional history database must not prevent a validated
@@ -331,8 +355,68 @@ class Storage:
 
     def nonessential_errors(self):
         return "；".join(
-            filter(None, (self.history_error, self.backup_error, self.snapshot_error))
+            filter(
+                None,
+                (
+                    self.history_error,
+                    self.backup_error,
+                    self.snapshot_error,
+                    self.restart_error,
+                ),
+            )
         )
+
+    @staticmethod
+    def endpoint_signature(device):
+        return json.dumps([device.host, device.port, device.unit_id])
+
+    def restart_state(self, device):
+        state = self.restart_states.get(device.id)
+        return (
+            state
+            if state and state["endpoint"] == self.endpoint_signature(device)
+            else None
+        )
+
+    def prune_restart_states(self):
+        self.restart_states = {
+            d.id: state
+            for d in self.config.devices
+            if (state := self.restart_state(d)) is not None
+        }
+
+    async def remember_device(self, device, running, paused):
+        if not self.config_db or not self.writable():
+            self.restart_error = (
+                "设备运行状态持久化不可用或磁盘余量不足，重启可能恢复旧状态"
+            )
+            raise DomainError(self.restart_error, 503)
+        record = {
+            "endpoint": self.endpoint_signature(device.config),
+            "running": running,
+            "paused": paused,
+        }
+
+        def write(conn):
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "INSERT INTO device_state VALUES(?,?,?,?) ON CONFLICT(device) DO UPDATE SET endpoint=excluded.endpoint,running=excluded.running,paused=excluded.paused",
+                (device.config.id, record["endpoint"], int(running), int(paused)),
+            )
+            conn.commit()
+
+        try:
+            # Uses the existing FULL-synchronous configuration writer; never
+            # the lossy telemetry queue or the periodic value snapshot.
+            await self.config_db.call(write)
+        except DomainError as exc:
+            self.restart_error = (
+                "设备运行状态保存失败，请核对当前状态；重启状态可能待核对："
+                + exc.message
+            )
+            raise DomainError(self.restart_error, exc.status) from exc
+        self.restart_states[device.config.id] = record
+        self.restart_error = ""
 
     async def commit(self, new, runtime, check=None):
         if not self.writable() or not self.config_db:
@@ -364,6 +448,19 @@ class Storage:
                     "INSERT INTO config VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,data=excluded.data",
                     (new.version, text),
                 )
+                ids = [d.id for d in new.devices]
+                placeholders = ",".join("?" for _ in ids)
+                conn.execute(
+                    f"DELETE FROM device_state WHERE device NOT IN ({placeholders})"
+                    if ids
+                    else "DELETE FROM device_state",
+                    ids,
+                )
+                for d in new.devices:
+                    conn.execute(
+                        "DELETE FROM device_state WHERE device=? AND endpoint<>?",
+                        (d.id, self.endpoint_signature(d)),
+                    )
                 conn.commit()
                 return new.version
 
@@ -378,6 +475,7 @@ class Storage:
                     await asyncio.wrap_future(future)
                     runtime.apply(new, prepared)
                     self.config = new
+                    self.prune_restart_states()
                     runtime.event("config", "", f"配置版本 {new.version} 已生效")
                     self.config_pending = False
                 except Exception as exc:
@@ -399,6 +497,7 @@ class Storage:
                         )
                         runtime.apply(recovered)
                         self.config = recovered
+                        self.prune_restart_states()
                         self.config_pending, self.error = False, ""
                     except Exception:
                         pass

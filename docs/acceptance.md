@@ -24,6 +24,19 @@
 | 目标 Windows 桌面系统 | Windows Server 2022 x64 原生 CI 完成回归及独立包检查；目标 Windows 10／11 与服务账户仍须另测 | 原生 CI 通过，用户桌面环境未验收 |
 | 另一台电脑通过实际 LAN 访问 | 支持实际网卡监听；当前用独立进程的 TCP 客户端验证 | 未在第二台电脑及目标防火墙环境执行 |
 
+## 模板视图修正、设备重启状态与 Modbus 点表（当前 main）
+
+验证时间：2026-10-10T02:15:33.853136+00:00；在 `c3e932a` 后完成，未发布新 Release。机器可读证据：[point-table-recovery-validation.json](point-table-recovery-validation.json)。
+
+- 用户截图中的两行表头均为行号 1；旧冻结窗格下方仍选中 A1，加上表头筛选箭头易混淆。已将下方初始选择固定 A2，移除导入模板表头筛选，明确空白第2行输入格式、文本设备 ID 和数值小数格式；D/F/K/L 原生下拉显示及输入提示保留。原始 OOXML 回归及 LibreOffice headless 打开／保存后，前导零 ID、小数和四项验证定义、后端导入均通过；未实际运行 Excel/WPS 桌面点击，不能替代用户软件验收。
+- 设备启停／策略暂停意图每次成功操作前存入配置库 FULL 事务，不依赖定时值快照；正常关闭不会覆盖意图。实际强制终止应用、删除快照、同目录重启并真实 TCP 读取通过；运行／停止／暂停、批量启动与已停止目标、恢复策略、监听修改／删除清理、端口冲突与其他设备隔离、存储故障反馈均覆盖。
+- 新增单 Sheet Modbus 点表。验证真实 worker 与浏览器下载、所选点位／多设备共享端点、四区零基地址与六位参考编号（含地址65535）、Float32／Float64占用、编码／倍率／单位、有效读写功能码、前导零与公式安全。完整配置仍为三个 Sheet 并可往返，协议点表不用于导入。
+- 后端 **271 项通过**，66.20 秒；扩展批量状态检查后恢复回归 **5 项通过**。前端 **5 项通过**，TypeScript／Vite、Python 格式／未使用引用、Prettier 和 diff 检查通过；仅保留既有 TestClient 弃用提示。
+- Chromium **69 项通过**，无脚本错误，包含三种页面宽度和真实点表下载；报告及截图在 `artifacts/browser-point-table-recovery/`。人工查看设备信息 1440／390px 截图通过。
+- wheel 仓库外安装检查通过，全部 **25 个应用文件**与当前资源逐字节一致；产物／资源核对在 `artifacts/wheel-point-table-recovery/`，这是本地验收包，不代表新的原生 Release。
+- 最终源码短时混合负载 **140.721 秒、8330 次请求**、140 份实时快照、5 次订阅重连、1 次设备停止／重启通过，P99 18.860ms，无失败与队列丢弃。报告 `artifacts/soak-point-table-recovery/results/stage-1/report.json`；源码指纹 `ad94a989895c805ab8e06c41ae062c963c621caa8f4e6327d8136c13d74bb58a`。24／72小时、目标桌面系统及实际 LAN 仍待验收。
+
+
 ## 设备信息与简化点位导入（当前 main）
 
 验证时间：2026-10-10T09:48:14+08:00；在 `fffbb56` 后实现用户指定的设备信息及单 Sheet 点位模板，未发布新的原生 Release。报告：[point-template-validation.json](point-template-validation.json)。

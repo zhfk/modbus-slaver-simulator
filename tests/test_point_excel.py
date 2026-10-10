@@ -16,8 +16,9 @@ def workbook(tmp_path, rows):
     path = tmp_path / "points.xlsx"
     write_workbook({"kind": "template"}, path)
     wb = load_workbook(path)
-    for row in rows:
-        wb["点位"].append([row.get(column) for column in COLUMNS])
+    for index, row in enumerate(rows, 2):
+        for col, header in enumerate(COLUMNS, 1):
+            wb["点位"].cell(index, col, row.get(header))
     wb.save(path)
     wb.close()
     return path
@@ -40,10 +41,24 @@ def test_template_has_only_fourteen_columns_and_native_dropdowns(tmp_path):
     assert wb.sheetnames == ["点位"]
     ws = wb["点位"]
     assert [c.value for c in ws[1]] == list(COLUMNS)
-    assert ws.max_row == 1 and ws.max_column == 14
+    assert ws.max_row == 2 and ws.max_column == 14
+    assert all(c.value is None for c in ws[2])
+    assert ws.auto_filter.ref is None
+    assert ws.freeze_panes == "A2"
+    assert ws.sheet_view.pane.topLeftCell == "A2"
+    selection = ws.sheet_view.selection[0]
+    assert selection.pane == "bottomLeft"
+    assert selection.activeCell == selection.sqref == "A2"
+    assert not ws.protection.sheet
+    assert ws["A2"].number_format == "@"
+    assert ws["G2"].number_format == ws["J2"].number_format == "General"
     rules = list(ws.data_validations.dataValidation)
     assert len(rules) == 4 and all(
-        r.type == "list" and r.showErrorMessage for r in rules
+        r.type == "list"
+        and r.showErrorMessage
+        and r.showInputMessage
+        and r.showDropDown is False
+        for r in rules
     )
     assert any("线圈,离散输入,保持寄存器,输入寄存器" in r.formula1 for r in rules)
     assert any("均匀随机" in r.formula1 for r in rules)
@@ -257,11 +272,15 @@ def test_actual_worker_download_upsert_apply_preserves_random_preview_and_versio
         assert response.status_code == 200
         wb = load_workbook(BytesIO(response.content))
         assert wb.sheetnames == ["点位"]
-        for r in [
-            row(name="旧点位", **{"协议地址": 4, "类型": "UInt16", "初始值": 12}),
-            row(),
-        ]:
-            wb["点位"].append([r.get(c) for c in COLUMNS])
+        for index, r in enumerate(
+            [
+                row(name="旧点位", **{"协议地址": 4, "类型": "UInt16", "初始值": 12}),
+                row(),
+            ],
+            2,
+        ):
+            for col, header in enumerate(COLUMNS, 1):
+                wb["点位"].cell(index, col, r.get(header))
         stream = BytesIO()
         wb.save(stream)
         wb.close()
@@ -278,3 +297,35 @@ def test_actual_worker_download_upsert_apply_preserves_random_preview_and_versio
         actual = client.get("/api/config").json()["devices"][0]["points"]
         assert actual[0]["id"] == "old" and actual[1]["initial"] == point["initial"]
         assert client.post("/api/import/apply", json=data["config"]).status_code == 409
+
+
+def test_template_input_preserves_text_ids_and_decimal_numbers(tmp_path):
+    device_id = "000000000000000012345678"
+    current = Configuration(devices=[Device(id=device_id)]).model_dump()
+    path = workbook(
+        tmp_path,
+        [
+            row(
+                device=device_id,
+                **{
+                    "类型": "UInt16",
+                    "倍率": 0.25,
+                    "偏移": 0.5,
+                    "初始值": 1.25,
+                    "主机可写": "是",
+                },
+            )
+        ],
+    )
+    wb = load_workbook(path)
+    ws = wb["点位"]
+    assert ws["A2"].number_format == "@" and ws["A2"].data_type == "s"
+    assert ws["G2"].data_type == ws["H2"].data_type == ws["J2"].data_type == "n"
+    wb.close()
+    result = parse_workbook(path, "update", current)
+    assert not result["errors"], result
+    point = result["config"]["devices"][0]["points"][0]
+    assert (
+        point["scale"] == 0.25 and point["offset"] == 0.5 and point["initial"] == 1.25
+    )
+    assert point["writable"] and result["config"]["devices"][0]["id"] == device_id
