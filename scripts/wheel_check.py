@@ -72,6 +72,11 @@ def run(target):
             book = load_workbook(BytesIO(table.content))
             assert book.sheetnames == ["Modbus点表"]
             assert book.active.max_row == len(rows) + 1
+            assert book.active.max_column == 20
+            assert book.active.freeze_panes is None
+            assert not {"设备 ID", "分组", "初始值"}.intersection(
+                cell.value for cell in book.active[1]
+            )
             book.close()
             template = http.get("/api/export/template")
             assert template.status_code == 200

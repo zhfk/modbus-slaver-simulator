@@ -24,6 +24,17 @@
 | 目标 Windows 桌面系统 | Windows Server 2022 x64 原生 CI 完成回归及独立包检查；目标 Windows 10／11 与服务账户仍须另测 | 原生 CI 通过，用户桌面环境未验收 |
 | 另一台电脑通过实际 LAN 访问 | 支持实际网卡监听；当前用独立进程的 TCP 客户端验证 | 未在第二台电脑及目标防火墙环境执行 |
 
+## 0.2.0rc8 主机点表精简与发布验收
+
+验证时间：2026-10-10T10:28:34.919207+08:00。机器可读证据：[release-rc8-validation.json](release-rc8-validation.json)。
+
+- 主机接入点表精简为20列，删除设备ID／分组／初始值；保留实际端点、Unit ID、功能码、零基地址、参考编号、占用与编码参数。取消点表冻结窗格，实际导出的文件只有一行表头和一个窗格；Excel/WPS短暂重复表头的冻结区域已移除，未在其桌面GUI中人工点击。
+- 后端 **271项通过**，66.71秒；前端 **5项通过**及TypeScript／Vite构建通过。Chromium完整 **69项通过**，无脚本错误；报告 `artifacts/browser-release-rc8-final/browser.json`，包含三种宽度和实际20列点表下载。
+- 仓库外 wheel 和本地冻结Linux包 **8组检查通过**，覆盖真实三Unit读写、WebSocket、Excel子进程、20列点表、14列模板、同目录重启启停／暂停及Float32值恢复、离线维护。冻结检查已修正旧整数602断言，使用实际Float32原始寄存器；产物分别在 `artifacts/wheel-release-rc8-final/`、`artifacts/release-rc8-native-local/`，本地包不是官方Ubuntu发布包。
+- 最终源码短时混合负载 **140.864秒、8283次请求**、140份快照、5次订阅重连和1次设备重启通过，P99 34.917ms，无失败和队列丢弃；报告 `artifacts/soak-release-rc8-final/results/stage-1/report.json`，源码指纹 `aeab3e305c24e4be599d785371294b13fd61c12ad76835d956740f03d02c2517`。
+- 三平台原生CI和官方Release下载校验待执行，结果将在本节及JSON中追加，不将本地Linux构建冒充三平台通过。每平台检查报告将随Release发布；长期耐久、目标用户桌面及跨机器LAN仍待验收。
+
+
 ## 模板视图修正、设备重启状态与 Modbus 点表（当前 main）
 
 验证时间：2026-10-10T02:15:33.853136+00:00；在 `c3e932a` 后完成，未发布新 Release。机器可读证据：[point-table-recovery-validation.json](point-table-recovery-validation.json)。

@@ -49,8 +49,10 @@ def test_protocol_map_addresses_encoding_permissions_and_text_safety(tmp_path):
     assert wb.sheetnames == ["Modbus点表"]
     ws = wb.active
     assert [c.value for c in ws[1]] == HEADERS
+    assert ws.max_column == 20
+    assert not {"设备 ID", "分组", "初始值"}.intersection(HEADERS)
     rows = {
-        row[5]: dict(zip(HEADERS, row))
+        row[4]: dict(zip(HEADERS, row))
         for row in ws.iter_rows(min_row=2, values_only=True)
     }
     assert rows["coil"]["参考编号（六位）"] == "065536"
@@ -68,9 +70,10 @@ def test_protocol_map_addresses_encoding_permissions_and_text_safety(tmp_path):
     assert (h["倍率"], h["偏移"], h["工程单位"], h["写功能码"]) == (0.1, 2, "℃", "06")
     assert rows["readonly"]["写功能码"] == "—" and rows["input"]["占用长度"] == 4
     assert rows["input"]["参考编号（六位）"] == "300001"
-    assert ws["F4"].data_type == "s" and ws["L4"].number_format == "@"
-    assert ws.sheet_view.selection[0].activeCell == "A2"
-    assert ws["K1"].comment and ws["L1"].comment
+    assert ws["E4"].data_type == "s" and ws["J4"].number_format == "@"
+    assert ws.freeze_panes is None and ws.sheet_view.pane is None
+    assert ws.sheet_view.selection[0].activeCell == "A1"
+    assert ws["I1"].comment and ws["J1"].comment
     wb.close()
     with pytest.raises(ValueError, match="缺少"):
         parse_workbook(path, "update")
@@ -104,8 +107,12 @@ def test_actual_point_map_worker_selection_shared_endpoint_and_backup(tmp_path):
             assert "modbus-point-table.xlsx" in result.headers["content-disposition"]
             wb = load_workbook(BytesIO(result.content))
             assert wb.sheetnames == ["Modbus点表"] and wb.active.max_row == count + 1
+            assert wb.active.max_column == 20
+            assert not {"设备 ID", "分组", "初始值"}.intersection(
+                cell.value for cell in wb.active[1]
+            )
             assert {
-                r[4] for r in wb.active.iter_rows(min_row=2, values_only=True)
+                r[3] for r in wb.active.iter_rows(min_row=2, values_only=True)
             } == units
             wb.close()
         assert client.get("/api/export/point-table?ids=missing").status_code == 422

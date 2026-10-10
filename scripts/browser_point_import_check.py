@@ -153,9 +153,14 @@ async def check_point_import(page, url, output):
         await (await download_info.value).save_as(str(path))
         wb = load_workbook(path)
         assert wb.sheetnames == ["Modbus点表"] and wb.active.max_row == 4
-        assert wb.active["L2"].value == "000001"
-        assert wb.active["L3"].value == "400001"
-        assert wb.active["M3"].value == 2
+        assert wb.active.max_column == 20
+        assert wb.active.freeze_panes is None and wb.active.sheet_view.pane is None
+        assert not {"设备 ID", "分组", "初始值"}.intersection(
+            c.value for c in wb.active[1]
+        )
+        assert wb.active["J2"].value == "000001"
+        assert wb.active["J3"].value == "400001"
+        assert wb.active["K3"].value == 2
         wb.close()
         await (
             page.locator("details.menu summary").filter(has_text="导出 / 更多").click()

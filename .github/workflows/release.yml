@@ -119,4 +119,7 @@ jobs:
         shell: bash
         run: |
           cat release-assets/*/*.sha256 > release-assets/SHA256SUMS.txt
-          gh release create "$RELEASE_TAG" --verify-tag --prerelease --title "$RELEASE_TAG — standalone packages" --notes-file docs/release-notes.md release-assets/*/*.tar.gz release-assets/*/*.zip release-assets/SHA256SUMS.txt
+          for platform_dir in release-assets/*/; do
+            cp "${platform_dir}check.json" "release-assets/check-$(basename "$platform_dir").json"
+          done
+          gh release create "$RELEASE_TAG" --verify-tag --prerelease --title "$RELEASE_TAG — standalone packages" --notes-file docs/release-notes.md release-assets/*/*.tar.gz release-assets/*/*.zip release-assets/SHA256SUMS.txt release-assets/check-*.json

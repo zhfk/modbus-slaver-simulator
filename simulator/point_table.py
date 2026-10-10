@@ -4,16 +4,14 @@ from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from .codec import width
-from .point_excel import AREAS, freeze_header
+from .point_excel import AREAS
 
 HEADERS = [
     "设备名称",
-    "设备 ID",
     "监听 IP",
     "端口",
     "Unit ID",
     "点位名称",
-    "分组",
     "数据区",
     "读功能码",
     "写功能码",
@@ -28,7 +26,6 @@ HEADERS = [
     "偏移",
     "工程单位",
     "主机可写",
-    "初始值",
     "说明",
 ]
 READ_CODES = {"coil": (1,), "discrete": (2,), "holding": (3, 23), "input": (4,)}
@@ -59,12 +56,10 @@ def write_point_table(wb, devices):
             ws.append(
                 [
                     device["name"],
-                    device["id"],
                     device["host"],
                     device["port"],
                     device["unit_id"],
                     point["name"],
-                    point["group"],
                     areas[area],
                     codes(READ_CODES[area]),
                     codes(WRITE_CODES[area]) if writable else "—",
@@ -83,7 +78,6 @@ def write_point_table(wb, devices):
                     point["offset"],
                     point["unit"],
                     "是" if writable else "否",
-                    point["initial"],
                     point["description"],
                 ]
             )
@@ -94,14 +88,13 @@ def write_point_table(wb, devices):
         "协议地址（从0）": "Modbus 请求使用的零基起始地址。多寄存器点位按占用长度连续占用地址。",
         "参考编号（六位）": "对照编号，不是请求地址：0=线圈，1=离散输入，3=输入寄存器，4=保持寄存器；后五位=协议地址+1。例如保持寄存器地址0为400001（常见五位写法40001）。",
         "倍率": "工程值 = 解码原始值 × 倍率 + 偏移。",
-        "初始值": "配置中的工程初始值；实时值请使用导出当前快照。本点表供协议对接，不用于配置导入。",
     }
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="245C86")
         cell.alignment = Alignment(vertical="center")
         ws.column_dimensions[cell.column_letter].width = (
-            24 if cell.value in ("设备 ID", "说明") else 20
+            24 if cell.value == "说明" else 20
         )
         if cell.value in notes:
             cell.comment = Comment(notes[cell.value], "Modbus Simulator")
@@ -112,5 +105,6 @@ def write_point_table(wb, devices):
                 cell.data_type = "s"
                 cell.number_format = "@"
     ws.row_dimensions[1].height = 26
-    freeze_header(ws)
+    # Excel/WPS can briefly render a frozen header twice when opening a file.
+    # Keep the protocol handoff table in a single pane.
     ws.auto_filter.ref = ws.dimensions

@@ -1,9 +1,11 @@
 """Run the real frozen binary outside the checkout with three TCP devices."""
 
 import argparse
+import contextlib
 import asyncio
 from datetime import datetime, timezone
 import json
+from io import BytesIO
 import os
 from pathlib import Path
 import re
@@ -16,6 +18,7 @@ import time
 
 import httpx
 import psutil
+from openpyxl import load_workbook
 from pymodbus.client import ModbusTcpClient
 from websockets.asyncio.client import connect
 
@@ -24,6 +27,30 @@ def free_port():
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
+
+
+def stop_process(process):
+    children = (
+        psutil.Process(process.pid).children(recursive=True)
+        if process.poll() is None
+        else []
+    )
+    if process.poll() is None:
+        if os.name == "nt":
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            process.terminate()
+        try:
+            process.wait(timeout=25)
+        except subprocess.TimeoutExpired:
+            for child in children:
+                with contextlib.suppress(psutil.NoSuchProcess):
+                    child.kill()
+            process.kill()
+            process.wait(timeout=5)
+    for child in children:
+        if child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
+            child.wait(timeout=5)
 
 
 def check(binary, output):
@@ -60,7 +87,6 @@ def check(binary, output):
                 else 0,
             )
         address = f"http://127.0.0.1:{http_port}"
-        children = []
         try:
             with httpx.Client(base_url=address, trust_env=False, timeout=10) as http:
                 deadline = time.monotonic() + 40
@@ -151,9 +177,10 @@ def check(binary, output):
                             json.dumps({"device": keys[1], "ids": [point["id"]]})
                         )
                         snapshot = json.loads(await asyncio.wait_for(ws.recv(), 5))
-                        assert snapshot["complete"] and snapshot["items"][0]["raw"] == [
-                            602
-                        ]
+                        assert (
+                            snapshot["complete"]
+                            and snapshot["items"][0]["raw"] == point["raw"]
+                        )
 
                 asyncio.run(websocket_snapshot())
                 checks.append("real WebSocket snapshot from bundled protocol adapter")
@@ -171,32 +198,100 @@ def check(binary, output):
                 checks.append(
                     "spawned Excel export/import workers and temporary cleanup"
                 )
-                for key in keys:
-                    http.post(f"/api/devices/{key}/actions/stop").raise_for_status()
+                table = http.get("/api/export/point-table", timeout=65)
+                table.raise_for_status()
+                book = load_workbook(BytesIO(table.content))
+                assert book.sheetnames == ["Modbus点表"]
+                assert book.active.max_row == 13 and book.active.max_column == 20
+                headers = [cell.value for cell in book.active[1]]
+                assert not {"设备 ID", "分组", "初始值"}.intersection(headers)
+                assert (
+                    book.active.freeze_panes is None
+                    and book.active.sheet_view.pane is None
+                )
+                assert {
+                    row[3] for row in book.active.iter_rows(min_row=2, values_only=True)
+                } == {1, 2, 3}
+                book.close()
+                template = http.get("/api/export/template", timeout=65)
+                template.raise_for_status()
+                book = load_workbook(BytesIO(template.content))
+                assert book.sheetnames == ["点位"] and book.active.max_column == 14
+                assert book.active.sheet_view.selection[0].activeCell == "A2"
+                assert len(book.active.data_validations.dataValidation) == 4
+                book.close()
+                checks.append(
+                    "single-pane 20-column host point table and 14-column import template from frozen Excel workers"
+                )
+                http.post(f"/api/devices/{keys[1]}/actions/pause").raise_for_status()
                 response = http.get("/api/health/live")
                 response.raise_for_status()
                 assert response.json()["live"]
                 checks.append("external supervisor observes real business progress")
-                children = psutil.Process(process.pid).children(recursive=True)
         except BaseException:
             print((cwd / "service.log").read_text(errors="replace"))
             raise
         finally:
-            if process.poll() is None:
-                if os.name == "nt":
-                    process.send_signal(signal.CTRL_BREAK_EVENT)
-                else:
-                    process.terminate()
+            stop_process(process)
+        with (cwd / "restart.log").open("wb") as log:
+            restarted = subprocess.Popen(
+                [
+                    str(binary),
+                    "serve",
+                    "--data-dir",
+                    str(data),
+                    "--port",
+                    str(http_port),
+                ],
+                cwd=cwd,
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                if os.name == "nt"
+                else 0,
+            )
+        try:
+            with httpx.Client(base_url=address, trust_env=False, timeout=10) as http:
+                deadline = time.monotonic() + 40
+                while True:
+                    if restarted.poll() is not None:
+                        raise RuntimeError(
+                            (cwd / "restart.log").read_text(errors="replace")
+                        )
+                    try:
+                        if http.get("/api/health/ready").status_code == 200:
+                            break
+                    except httpx.HTTPError:
+                        pass
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Frozen restart readiness timeout")
+                    time.sleep(0.1)
+                states = {d["id"]: d for d in http.get("/api/devices").json()}
+                assert states[keys[0]]["status"] == "stopped"
+                assert (
+                    states[keys[1]]["status"] == "running" and states[keys[1]]["paused"]
+                )
+                assert (
+                    states[keys[2]]["status"] == "running"
+                    and not states[keys[2]]["paused"]
+                )
+                client = ModbusTcpClient("127.0.0.1", port=tcp_port, timeout=2)
                 try:
-                    process.wait(timeout=25)
-                except subprocess.TimeoutExpired:
-                    for child in psutil.Process(process.pid).children(recursive=True):
-                        child.kill()
-                    process.kill()
-                    process.wait(timeout=5)
-            for child in children:
-                if child.is_running() and child.status() != psutil.STATUS_ZOMBIE:
-                    child.wait(timeout=5)
+                    assert client.connect()
+                    assert client.read_holding_registers(
+                        0, count=2, device_id=2
+                    ).registers == list(struct.unpack(">HH", struct.pack(">f", 62.25)))
+                finally:
+                    client.close()
+                checks.append(
+                    "same-directory frozen process restart restores running/stopped/paused state and actual Float32 TCP values"
+                )
+        except BaseException:
+            print((cwd / "restart.log").read_text(errors="replace"))
+            raise
+        finally:
+            stop_process(restarted)
         # The same binary provides maintenance without an installed Python.
         for command in (
             ["compact"],

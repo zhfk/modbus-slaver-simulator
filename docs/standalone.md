@@ -7,8 +7,8 @@ GitHub [Releases](https://github.com/zhfk/modbus-slaver-simulator/releases) 中�
 Linux：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc7-linux-x86_64.tar.gz
-cd modbus-simulator-0.2.0rc7-linux-x86_64
+tar -xzf modbus-simulator-0.2.0rc8-linux-x86_64.tar.gz
+cd modbus-simulator-0.2.0rc8-linux-x86_64
 ./start.sh
 ```
 
@@ -80,3 +80,5 @@ npm --prefix frontend run build
 Windows 对应 `.release-venv\Scripts\python.exe` 和 `modbus-simulator.exe`。默认输出 `dist/release/`，已有同名包时拒绝覆盖；可用 `--output` 指定新的输出目录。构建信息中的 libc 基线决定 Linux 兼容范围，不能承诺所有发行版均可使用。
 
 GitHub Actions 的 `release.yml` 在 Linux x86_64、Windows x64、macOS Apple Silicon 三种原生 runner 构建、回归检查并验证解压包。创建与 `pyproject.toml` 版本匹配的 `v*` 标签触发发布；手动运行仅生成 Actions 产物。三个目标全部检查成功后，发布任务使用仓库自带的 `GITHUB_TOKEN` 上传三个平台包及校验文件；不构建 Intel macOS 包。当前自动发布标记为 prerelease；长期验收通过后才能另行提升为稳定版本。
+
+rc8 包包含当前设备菜单／批量启停、赋值历史、帮助与引导、单 Sheet 点位导入和主机接入点表。点表为20列，去掉设备ID、分组和初始值，使用单窗格表头。使用原数据目录重启时，恢复最近成功保存的设备启停及策略暂停状态；正常关闭应用无需先停止设备，人工停止会保留停止意图。最近数值仍按兼容快照恢复。
