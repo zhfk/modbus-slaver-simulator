@@ -1,0 +1,72 @@
+{
+  "checked_at": "2026-10-10 08:54",
+  "timezone": "Asia/Shanghai",
+  "base_commit": "3eae3a534cf82882f24cd43becf6fa23e8b9f8da",
+  "scope": "source-only main; distinguish loading, empty and failed assignment history; preserve cached records and explain HTTP errors",
+  "user_report": {
+    "frontend_rebuilt_and_backend_restarted": true,
+    "missing_assignment_reproduced_on_current_source": false,
+    "specific_operation_path_not_yet_confirmed": true,
+    "no_fabricated_or_backfilled_records": true
+  },
+  "backend": {
+    "passed": 232,
+    "seconds": 63.58,
+    "warnings": 1,
+    "assignment_regressions": 25
+  },
+  "frontend": {
+    "chart_tests_passed": 5,
+    "typecheck_build_passed": true,
+    "format_passed": true
+  },
+  "python_style": {
+    "format_passed": true,
+    "unused_imports_passed": true
+  },
+  "browser": {
+    "passed": true,
+    "checks": 63,
+    "page_errors": [],
+    "report": "artifacts/history-read-status-browser-final/browser.json",
+    "regressions": [
+      "real page/API/Modbus assignment history",
+      "404 detail/503 message preserved; no undefined",
+      "initial failure does not claim no records",
+      "cached records survive failure and recover on retry",
+      "dismissed same error stays dismissed",
+      "delayed first response and device switch"
+    ]
+  },
+  "wheel": {
+    "installed_outside_checkout": true,
+    "passed": true,
+    "build_artifacts": "artifacts/wheel-history-read-status/",
+    "help_spa": true,
+    "local_assets_fonts": true,
+    "real_float32_two_registers": true,
+    "success_failure_history_restart_passed": true
+  },
+  "soak": {
+    "status": "passed",
+    "completed_seconds": 140.608,
+    "requests": 8322,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "ea92f68758cdd6af3d17b0be24564c49459ce93acc9548e8025052ba7e63f1e4",
+    "p99_ms": 23.352887001237832,
+    "failures": [],
+    "queue_dropped": 0,
+    "report": "artifacts/soak-history-read-status-final/results/stage-1/report.json"
+  },
+  "source_fingerprint_matches_current": true,
+  "release_published": false,
+  "remaining": [
+    "Confirm the user operation path and actual same-device HTTP responses if the specific missing record persists",
+    "24/72 hour endurance",
+    "native rebuilds for new source features",
+    "target user desktop systems",
+    "actual LAN and firewall environment"
+  ]
+}

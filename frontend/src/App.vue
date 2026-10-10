@@ -61,6 +61,9 @@ const health = ref<Row>({ storage: {}, endpoints: [] }),
   expandedLog = ref<Row | null>(null);
 const connections = ref<Row>({ items: [], active: false });
 const assignmentHistory = ref<Row>({ items: [], warning: "" });
+const assignmentState = ref("idle");
+const assignmentError = ref("");
+const dismissedAssignmentError = ref("");
 const assignmentDetail = ref<Row | null>(null);
 const deviceConnectionCount = computed(
   () => connections.value.items.filter((c: Row) => c.accessed_device).length,
@@ -112,6 +115,17 @@ const storageError = computed(
 );
 const feedbackItems = computed<Feedback[]>(() => {
   const items: Feedback[] = [];
+  if (
+    tab.value === "assignments" &&
+    assignmentError.value &&
+    assignmentError.value !== dismissedAssignmentError.value
+  )
+    items.push({
+      id: "assignment-query",
+      title: "赋值历史读取失败",
+      kind: "alert",
+      message: assignmentError.value,
+    });
   if (
     tab.value === "assignments" &&
     assignmentHistory.value.warning &&
@@ -214,6 +228,10 @@ const feedbackItems = computed<Feedback[]>(() => {
   return items;
 });
 function dismissFeedback(id: string) {
+  if (id === "assignment-query") {
+    dismissedAssignmentError.value = assignmentError.value;
+    return;
+  }
   if (id === "assignment-storage") {
     dismissedAssignmentWarning.value = assignmentHistory.value.warning;
     return;
@@ -475,6 +493,14 @@ function bytes(value: number) {
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
+class RequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 async function request(path: string, options: RequestInit = {}) {
   const response = await fetch(path, {
     ...options,
@@ -488,9 +514,12 @@ async function request(path: string, options: RequestInit = {}) {
     const body = await response
       .json()
       .catch(() => ({ message: `请求失败 ${response.status}` }));
-    throw new Error(
-      body.message +
+    throw new RequestError(
+      (body.message ||
+        (typeof body.detail === "string" ? body.detail : "") ||
+        `请求失败 ${response.status}`) +
         (body.details ? "\n" + JSON.stringify(body.details, null, 2) : ""),
+      response.status,
     );
   }
   return response.json();
@@ -612,10 +641,7 @@ async function poll() {
           connections.value = data;
       }
       if (tab.value === "assignments") {
-        const key = deviceId.value;
-        const data = await request(`/api/devices/${key}/assignments`);
-        if (key === deviceId.value && tab.value === "assignments")
-          assignmentHistory.value = data;
+        await loadAssignments();
       }
       if (showTrend.value && !pauseChart.value && trendKeys.value.length) {
         const key = deviceId.value;
@@ -655,6 +681,8 @@ watch(deviceId, async (key, previous) => {
   closePacket();
   connections.value = { items: [], active: false };
   assignmentHistory.value = { items: [], warning: "" };
+  assignmentState.value = "idle";
+  assignmentError.value = dismissedAssignmentError.value = "";
   dismissedAssignmentWarning.value = "";
   assignmentDetail.value = null;
   diagnostics.value = [];
@@ -1454,7 +1482,8 @@ async function applyAssign() {
     });
     await loadPoints();
     modal.value = "";
-    notice.value = "当前值已修改；初始值保持原配置";
+    notice.value =
+      "当前值已修改；初始值保持原配置。操作记录请在设备的“赋值历史”页签查看。";
   });
 }
 async function setInitial(row: Row) {
@@ -1722,6 +1751,24 @@ function assignmentSource(row: Row) {
   if (row.origin === "web") return "页面赋值";
   if (row.origin === "api") return "API 赋值";
   return "Modbus 写入";
+}
+async function loadAssignments() {
+  const key = deviceId.value;
+  if (assignmentState.value === "idle") assignmentState.value = "loading";
+  try {
+    const data = await request(`/api/devices/${key}/assignments`);
+    if (key !== deviceId.value || tab.value !== "assignments") return;
+    assignmentHistory.value = data;
+    assignmentState.value = "ready";
+    assignmentError.value = dismissedAssignmentError.value = "";
+  } catch (e) {
+    if (key !== deviceId.value || tab.value !== "assignments") return;
+    assignmentState.value = "error";
+    assignmentError.value =
+      e instanceof RequestError && e.status === 404 && e.message === "Not Found"
+        ? "当前服务未提供赋值历史接口，请核对访问端口与实际启动的后端版本。读取失败不表示没有赋值记录。"
+        : `无法读取赋值历史：${(e as Error).message}。已有记录保留，请重试。`;
+  }
 }
 function assignmentTime(value: number) {
   return new Date(value * 1000).toLocaleString("zh-CN", {
@@ -2489,7 +2536,14 @@ onUnmounted(() => {
             <div>
               <h2>赋值历史</h2>
               <p>
-                最近 {{ assignmentHistory.items.length }}／100 条 · 按时间倒序 ·
+                <template
+                  v-if="
+                    assignmentState === 'ready' ||
+                    assignmentHistory.items.length
+                  "
+                  >最近 {{ assignmentHistory.items.length }}／100 条</template
+                >
+                <template v-else>记录数量待确认</template> · 按时间倒序 ·
                 成功和失败均记录
               </p>
             </div>
@@ -2565,8 +2619,21 @@ onUnmounted(() => {
             </table>
           </div>
           <div v-else class="empty">
-            <h3>暂无赋值记录</h3>
-            <p>执行人工赋值或接收到外部主机写入后，记录会显示在这里。</p>
+            <h3>
+              {{
+                assignmentState === "error"
+                  ? "赋值历史暂不可用"
+                  : assignmentState !== "ready"
+                    ? "正在读取赋值历史…"
+                    : "暂无赋值记录"
+              }}
+            </h3>
+            <p v-if="assignmentState === 'ready'">
+              执行人工赋值或接收到外部主机写入后，记录会显示在这里。
+            </p>
+            <p v-else-if="assignmentState === 'error'">
+              读取失败，请查看浮动提示并重试。
+            </p>
           </div>
         </section>
         <section v-if="tab === 'connections'" class="panel connection-panel">

@@ -97,6 +97,75 @@ async def check_help_and_history(page, url, output):
     checks.append(
         "actual UI/API/Modbus successful and failed assignments, distinct sources/host/function, descending timestamps"
     )
+    history_url = url + f"/api/devices/{key}/assignments"
+
+    async def missing_history(route):
+        await route.fulfill(status=404, json={"detail": "Not Found"})
+
+    await page.route(history_url, missing_history)
+    error_popup = page.get_by_role("alert", name="赋值历史读取失败", exact=True)
+    await expect(error_popup).to_contain_text("当前服务未提供赋值历史接口")
+    await expect(panel.locator("tbody tr")).to_have_count(5)
+    await expect(error_popup).not_to_contain_text("undefined")
+    await error_popup.get_by_role(
+        "button", name="关闭赋值历史读取失败", exact=True
+    ).click()
+    await page.wait_for_timeout(1100)
+    await expect(error_popup).to_be_hidden()
+    await page.reload()
+    await page.locator(".device-link").filter(has_text=first["name"]).click()
+    await page.get_by_role("button", name="赋值历史", exact=True).click()
+    await expect(
+        panel.get_by_role("heading", name="赋值历史暂不可用", exact=True)
+    ).to_be_visible()
+    await expect(
+        panel.get_by_role("heading", name="暂无赋值记录", exact=True)
+    ).to_have_count(0)
+    await expect(error_popup).to_contain_text("实际启动的后端版本")
+    await page.unroute(history_url, missing_history)
+    await panel.get_by_role("button", name="刷新记录", exact=True).click()
+    await expect(panel.locator("tbody tr")).to_have_count(5)
+    await expect(error_popup).to_be_hidden()
+
+    async def failed_history(route):
+        await route.fulfill(status=503, json={"message": "历史服务暂不可用"})
+
+    await page.route(history_url, failed_history)
+    await expect(error_popup).to_contain_text("历史服务暂不可用")
+    await expect(panel.locator("tbody tr")).to_have_count(5)
+    await page.unroute(history_url, failed_history)
+    await expect(error_popup).to_be_hidden()
+    checks.append(
+        "history read failure is distinct from empty history; legacy 404 details, preserved records, dismiss and retry recovery"
+    )
+
+    requested, release = asyncio.Event(), asyncio.Event()
+
+    async def delayed_history(route):
+        requested.set()
+        await asyncio.wait_for(release.wait(), 5)
+        await route.continue_()
+
+    second_history_url = url + f"/api/devices/{second['id']}/assignments"
+    await page.route(second_history_url, delayed_history)
+    await page.locator(".device-link").filter(has_text=second["name"]).click()
+    await asyncio.wait_for(requested.wait(), 5)
+    await expect(
+        panel.get_by_role("heading", name="正在读取赋值历史…", exact=True)
+    ).to_be_visible()
+    await expect(
+        panel.get_by_role("heading", name="暂无赋值记录", exact=True)
+    ).to_have_count(0)
+    release.set()
+    await expect(
+        panel.get_by_role("heading", name="暂无赋值记录", exact=True)
+    ).to_be_visible()
+    await page.unroute(second_history_url, delayed_history)
+    await page.locator(".device-link").filter(has_text=first["name"]).click()
+    await expect(panel.locator("tbody tr")).to_have_count(5)
+    checks.append(
+        "loading history does not claim an empty result; switching devices waits for a confirmed response"
+    )
     for width in (1440, 1024, 390):
         await page.set_viewport_size(
             {"width": width, "height": 1000 if width > 500 else 844}
