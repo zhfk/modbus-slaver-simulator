@@ -5,12 +5,14 @@ import re
 import socket
 import sys
 import tempfile
+from io import BytesIO
 from pathlib import Path
 
 
 def run(target):
     sys.path.insert(0, str(Path(target).resolve()))
     import simulator
+    from openpyxl import load_workbook
     from fastapi.testclient import TestClient
     from pymodbus.client import ModbusTcpClient
     from simulator.api import create_app
@@ -63,6 +65,47 @@ def run(target):
                 assert history[1]["changes"][0]["after"] == 75.25
             finally:
                 client.close()
+            template = http.get("/api/export/template")
+            assert template.status_code == 200
+            wb = load_workbook(BytesIO(template.content))
+            assert wb.sheetnames == ["点位"] and wb["点位"].max_column == 14
+            assert len(wb["点位"].data_validations.dataValidation) == 4
+            wb["点位"].append(
+                [
+                    key,
+                    rows[1]["name"],
+                    "",
+                    "保持寄存器",
+                    0,
+                    "Float32",
+                    1,
+                    0,
+                    "℃",
+                    20,
+                    "是",
+                    "均匀随机",
+                    100,
+                    0,
+                ]
+            )
+            stream = BytesIO()
+            wb.save(stream)
+            wb.close()
+            preview = http.post(
+                "/api/import/preview",
+                files={"file": ("points.xlsx", stream.getvalue())},
+            ).json()
+            assert (
+                not preview["errors"]
+                and preview["changed"] == 1
+                and preview["added"] == 0
+            )
+            assert (
+                http.post("/api/import/apply", json=preview["config"]).status_code
+                == 200
+            )
+            points = http.get(f"/api/devices/{key}/points").json()["items"]
+            assert points[1]["id"] == rows[1]["id"] and points[1]["value"] == 75.25
             assert http.post(f"/api/devices/{key}/actions/stop").status_code == 200
         with TestClient(create_app(Path(data))) as restarted:
             assert (
@@ -112,7 +155,7 @@ def run(target):
         with TestClient(create_app(Path(data))) as again:
             assert again.get(f"/api/devices/{key}/assignments").json()["items"] == after
     print(
-        "Installed wheel passed: SPA/help, local assets/fonts, API, real Modbus write/read, new success/failure assignments after snapshot restore and persistence"
+        "Installed wheel passed: SPA/help, local assets/fonts, API, real Modbus write/read, single-sheet template/name upsert, new success/failure assignments after snapshot restore and persistence"
     )
 
 

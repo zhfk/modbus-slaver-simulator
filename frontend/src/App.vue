@@ -352,6 +352,7 @@ const strategyNames: Row = {
 const booleanStrategies = [
   "none",
   "fixed",
+  "random",
   "sequence",
   "replay",
   "expression",
@@ -430,7 +431,7 @@ const modalTitle = computed(
     (
       ({
         point: editingId.value ? "编辑点位" : "新增点位",
-        device: "设备设置",
+        device: "设备编辑",
         new: "新建设备",
         assign: "修改当前值",
         import: "Excel 导入",
@@ -1368,6 +1369,8 @@ function changeStrategy() {
   draft.value.strategy.params = {};
   for (const [key, , value] of parameters[draft.value.strategy.kind] || [])
     draft.value.strategy.params[key] = value;
+  if (draft.value.type === "Bool" && draft.value.strategy.kind === "random")
+    draft.value.strategy.params.max = 1;
   draft.value.strategy.dependencies = [];
   paramText.value = "{}";
   if (["ramp", "sequence", "replay"].includes(draft.value.strategy.kind))
@@ -1426,7 +1429,7 @@ async function savePoint() {
       !booleanStrategies.includes(point.strategy.kind)
     )
       throw new Error(
-        "该策略不适用于 Bool，请选择固定值、状态序列、回放、表达式或回差报警",
+        "该策略不适用于 Bool，请选择固定值、均匀随机、状态序列、回放、表达式或回差报警",
       );
     if (["sequence", "replay"].includes(point.strategy.kind))
       point.strategy.params.values = JSON.parse(sampleText.value);
@@ -1600,6 +1603,7 @@ async function applyImport() {
   await action(async () => {
     if (
       importMode.value === "replace" &&
+      importPreview.value?.format !== "points" &&
       !confirm(
         `将替换当前设备配置并删除 ${importPreview.value?.deleted || 0} 个点位，是否继续？`,
       )
@@ -2159,8 +2163,8 @@ onUnmounted(() => {
         <span class="eyebrow">开始配置</span>
         <h2>{{ loaded ? "还没有设备" : "正在连接后端" }}</h2>
         <p>
-          创建温控设备模板，或通过 Excel 导入设备与点位。配置完成后再启动 Modbus
-          服务。
+          创建温控模板或空设备，再通过 Excel
+          导入点位；完整配置导出也可导回设备。配置完成后再启动 Modbus 服务。
         </p>
         <div class="button-row">
           <button class="primary" @click="openModal('new')">新建设备</button
@@ -2845,25 +2849,107 @@ onUnmounted(() => {
             <p>外部主机连接当前监听端点后，将在这里显示真实请求。</p>
           </div>
         </section>
-        <section v-if="tab === 'settings'" class="panel settings-summary">
-          <h2>设备配置</h2>
+        <section
+          v-if="tab === 'settings'"
+          class="panel settings-summary"
+          aria-label="设备信息"
+        >
+          <h2>设备信息</h2>
+          <dl class="device-id-summary">
+            <dt>设备 ID</dt>
+            <dd>
+              <code class="selectable-id">{{ deviceConfig.id }}</code
+              ><span class="hint"> · 导入点位时填写此 ID</span>
+            </dd>
+          </dl>
+          <h3>基本信息</h3>
           <dl>
-            <dt>监听端点</dt>
-            <dd>{{ device.host }}:{{ device.port }}</dd>
+            <dt>设备名称</dt>
+            <dd>{{ deviceConfig.name }}</dd>
+            <dt>说明</dt>
+            <dd class="preserve-lines">
+              {{ deviceConfig.description || "未填写" }}
+            </dd>
+          </dl>
+          <h3>监听与协议</h3>
+          <dl>
+            <dt>绑定 IP</dt>
+            <dd>{{ deviceConfig.host }}</dd>
+            <dt>端口</dt>
+            <dd>{{ deviceConfig.port }}</dd>
             <dt>Unit ID</dt>
-            <dd>{{ device.unit_id }}</dd>
-            <dt>功能码</dt>
-            <dd>{{ deviceConfig.functions.join(", ") }}</dd>
-            <dt>重启自动启动</dt>
-            <dd>{{ deviceConfig.auto_start ? "已开启" : "关闭" }}</dd>
+            <dd>{{ deviceConfig.unit_id }}</dd>
+            <dt>最大连接数</dt>
+            <dd>{{ deviceConfig.max_connections }}</dd>
+            <dt>空闲超时（秒）</dt>
+            <dd>{{ deviceConfig.idle_seconds }}</dd>
+            <dt>组帧超时（秒）</dt>
+            <dd>{{ deviceConfig.frame_seconds }}</dd>
             <dt>未配置地址</dt>
             <dd>
               {{
                 deviceConfig.missing_address === "zero"
-                  ? "读取返回零；未映射写入拒绝"
+                  ? "读取零值（未映射写入拒绝）"
                   : "无效地址异常"
               }}
             </dd>
+            <dt>未知 Unit ID</dt>
+            <dd>
+              {{
+                deviceConfig.unknown_unit === "silence"
+                  ? "不响应"
+                  : "网关目标无响应异常"
+              }}
+            </dd>
+            <dt>有效地址范围</dt>
+            <dd>
+              <span v-if="!Object.keys(deviceConfig.valid_ranges).length"
+                >未限制（点位映射以外按未配置地址规则处理）</span
+              >
+              <div
+                v-for="(ranges, area) in deviceConfig.valid_ranges"
+                :key="area"
+              >
+                {{ areaDescriptions[area] }}（{{ areaNames[area] }}）：{{
+                  ranges
+                    .map((range: number[]) => `${range[0]}～${range[1]}`)
+                    .join("、") || "无可用地址"
+                }}
+              </div>
+            </dd>
+            <dt>启用功能码</dt>
+            <dd>
+              <div v-for="f in deviceConfig.functions" :key="f">
+                {{ f }} · {{ functionDescriptions[f] }}
+              </div>
+            </dd>
+            <dt>重启自动启动</dt>
+            <dd>{{ deviceConfig.auto_start ? "已开启" : "关闭" }}</dd>
+          </dl>
+          <h3>设备身份</h3>
+          <dl>
+            <dt>设备身份读取（43 / 14）</dt>
+            <dd>
+              {{ deviceConfig.read_identity ? "已开启" : "关闭" }} ·
+              供主机读取厂商、产品与版本，不读写点位
+            </dd>
+            <dt>厂商</dt>
+            <dd>{{ deviceConfig.identity.vendor || "未填写" }}</dd>
+            <dt>产品</dt>
+            <dd>{{ deviceConfig.identity.product || "未填写" }}</dd>
+            <dt>版本</dt>
+            <dd>{{ deviceConfig.identity.revision || "未填写" }}</dd>
+          </dl>
+          <h3>故障注入</h3>
+          <dl>
+            <dt>响应延迟（毫秒）</dt>
+            <dd>{{ deviceConfig.faults.delay_ms }}</dd>
+            <dt>不响应概率</dt>
+            <dd>{{ deviceConfig.faults.timeout_rate }}</dd>
+            <dt>断连概率</dt>
+            <dd>{{ deviceConfig.faults.disconnect_rate }}</dd>
+            <dt>冻结策略生成</dt>
+            <dd>{{ deviceConfig.faults.freeze ? "已开启" : "关闭" }}</dd>
           </dl>
         </section>
       </template>
@@ -3042,7 +3128,7 @@ onUnmounted(() => {
         :disabled="busy || !menuDevice"
         @click="deviceMenuAction('settings')"
       >
-        设备设置
+        设备信息
       </button>
       <button
         role="menuitem"
@@ -3333,8 +3419,8 @@ onUnmounted(() => {
             </details>
             <h3>模拟策略</h3>
             <p v-if="draft.type === 'Bool'" class="hint">
-              布尔点位只接受
-              0／1。固定值使用关／开；序列、回放的样本和表达式结果也必须为
+              布尔点位只接受 0／1。均匀随机仅生成 0／1，上下限也仅允许
+              0／1；固定值使用关／开；序列、回放的样本和表达式结果也必须为
               0／1。
             </p>
             <p v-if="draft.write_mode === 'control'" class="hint">
@@ -3734,16 +3820,25 @@ onUnmounted(() => {
                   @change="fileSelected" /></label
               ><label
                 >导入方式<select aria-label="导入方式" v-model="importMode">
-                  <option value="update">按稳定 ID 更新</option>
-                  <option value="new">新增设备与点位</option>
+                  <option value="update">
+                    点位按名称更新／完整配置按 ID 更新
+                  </option>
+                  <option value="new">完整配置：新增设备与点位</option>
                   <option value="replace" :disabled="!deviceId">
-                    替换当前设备全部配置
+                    完整配置：替换当前设备全部配置
                   </option>
                 </select></label
               >
               <p>
-                当前设备：{{ device?.name || "无" }}。配置模板使用从 0
-                开始的协议地址；快照与历史文件不能作为配置导入。
+                单 Sheet 点位模板：在设备信息中复制设备
+                ID，每行自行填写。按同一设备内的名称精确匹配，存在则更新，不存在则新增；未列出的点位保留，不受上方完整配置模式影响。协议地址从
+                0 开始。
+              </p>
+              <p>
+                数据区、类型和策略从 Excel
+                下拉选择。空初始值按类型随机生成，默认均匀随机、每秒更新；Bool
+                只生成
+                0／1。表达式和温控等复杂策略在页面编辑。完整配置导出可按上方模式导回；快照与历史不能作为配置导入。
               </p>
               <button @click="exportData('template')">下载模板</button
               ><button

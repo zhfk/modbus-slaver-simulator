@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from .models import Configuration, uid
 from .errors import DomainError
 from .files import directory_bytes
+from .point_excel import parse_points, write_template
 
 DEVICE_COLUMNS = {
     "设备 ID": "id",
@@ -79,6 +80,12 @@ def text_cells(ws):
 def write_workbook(payload, destination):
     wb = Workbook()
     meta = wb.active
+    if payload.get("kind") == "template":
+        write_template(wb)
+        meta.freeze_panes = "A2"
+        meta.auto_filter.ref = "A1:N1"
+        wb.save(destination)
+        return {"path": str(destination)}
     meta.title = "格式"
     meta.append(["格式版本", 1])
     meta.append(["类型", payload.get("kind", "config")])
@@ -138,7 +145,7 @@ def write_workbook(payload, destination):
     return {"path": str(destination)}
 
 
-def parse_workbook(source, mode):
+def parse_workbook(source, mode, current=None):
     errors = []
 
     def json_field(value, sheet, row, field, fallback):
@@ -184,6 +191,8 @@ def parse_workbook(source, mode):
             }
     wb = load_workbook(source, read_only=True, data_only=False)
     try:
+        if wb.sheetnames == ["点位"]:
+            return parse_points(wb, current)
         if not {"格式", "设备", "点位"}.issubset(wb.sheetnames):
             raise ValueError("缺少格式、设备或点位工作表")
         meta = {
@@ -350,7 +359,7 @@ def parse_workbook(source, mode):
 def child(operation, payload, destination, result):
     try:
         data = (
-            parse_workbook(payload["path"], payload["mode"])
+            parse_workbook(payload["path"], payload["mode"], payload.get("current"))
             if operation == "parse"
             else write_workbook(payload, destination)
         )

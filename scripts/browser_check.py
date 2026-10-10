@@ -16,12 +16,14 @@ from simulator.excel import write_workbook
 from simulator.models import Point
 
 if __package__:
+    from .browser_point_import_check import check_point_import
     from .browser_help_check import (
         check_global_settings,
         check_help_and_history,
         open_global_setting,
     )
 else:
+    from browser_point_import_check import check_point_import
     from browser_help_check import (
         check_global_settings,
         check_help_and_history,
@@ -872,7 +874,7 @@ async def run(url, output):
         dialog = page.get_by_role("dialog")
         strategy = dialog.get_by_label("策略类型", exact=True)
         await expect(strategy).to_be_enabled()
-        assert await strategy.locator("option[value='random']").count() == 0
+        assert await strategy.locator("option[value='random']").count() == 1
         assert await strategy.locator("option[value='sine']").count() == 0
         await strategy.select_option("fixed")
         await dialog.get_by_label("固定值", exact=True).select_option("1")
@@ -1032,9 +1034,9 @@ async def run(url, output):
             await page.request.get(url + f"/api/devices/{second['id']}/points")
         ).json()
         assert value["items"][0]["value"] == 12
-        await device_action("共享端点第二台", "设备设置")
+        await device_action("共享端点第二台", "设备信息")
         await expect(
-            page.get_by_role("heading", name="设备配置", exact=True)
+            page.get_by_role("heading", name="设备信息", exact=True)
         ).to_be_visible()
         assert (
             await page.locator(".page-header button")
@@ -1070,7 +1072,7 @@ async def run(url, output):
             ).to_be_focused()
             await page.keyboard.press("Home")
             await expect(
-                menu.get_by_role("menuitem", name="设备设置", exact=True)
+                menu.get_by_role("menuitem", name="设备信息", exact=True)
             ).to_be_focused()
             await page.keyboard.press("ArrowDown")
             assert (
@@ -1548,6 +1550,7 @@ async def run(url, output):
             await page.request.post(url + f"/api/devices/{second['id']}/actions/stop")
         ).status == 200
         new_checks = global_checks + await check_help_and_history(page, url, output)
+        new_checks += await check_point_import(page, url, output)
         assert not failures, failures
         await browser.close()
     report = {

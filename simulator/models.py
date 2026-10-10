@@ -221,6 +221,15 @@ class Point(StrictModel):
             raise ValueError("位数据区只允许 Bool，寄存器数据区不允许 Bool")
         if self.type == "Bool" and (self.scale != 1 or self.offset != 0):
             raise ValueError("Bool 不使用倍率和偏移")
+        if self.type == "Bool" and self.strategy.kind == "random":
+            lo, hi = (
+                self.strategy.params.get("min", 0),
+                self.strategy.params.get("max", 1),
+            )
+            if lo not in (0, 1) or hi not in (0, 1) or lo > hi:
+                raise ValueError(
+                    "Bool 均匀随机的最小值和最大值只能为 0／1，且最小值不能大于最大值"
+                )
         if self.area in ("discrete", "input") and self.writable:
             raise ValueError("输入数据区对主机只读")
         if self.address + width(self.type) > 65536:

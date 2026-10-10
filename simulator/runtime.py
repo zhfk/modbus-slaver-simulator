@@ -382,6 +382,8 @@ class DeviceRuntime:
         if kind == "fixed":
             return par.get("value", p.initial)
         if kind == "random":
+            if p.type == "Bool":
+                return st.rng.randint(int(number("min", 0)), int(number("max", 1)))
             return st.rng.uniform(number("min", 0), number("max", 100))
         if kind in ("sine", "noise"):
             base = par.get("base", "sine") if kind == "noise" else "sine"

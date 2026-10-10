@@ -688,6 +688,7 @@ def create_app(data_dir=None, static_dir=None):
         ).lower().endswith(".xlsx"):
             raise DomainError("仅支持 xlsx 文件及新增／更新／替换模式")
         token = uid()
+        current = storage().config.model_dump()
         path = storage().tmp / f"{token}.upload.xlsx"
         total = 0
         try:
@@ -704,14 +705,21 @@ def create_app(data_dir=None, static_dir=None):
                         raise DomainError("临时文件预算不足", 507)
                     await asyncio.to_thread(output.write, chunk)
             result = await context["heavy"].run(
-                "parse", {"path": str(path), "mode": mode}
+                "parse", {"path": str(path), "mode": mode, "current": current}
             )
         finally:
             path.unlink(missing_ok=True)
             await file.close()
         if result.get("errors"):
             return result
-        current = storage().config.model_dump()
+        if result.get("format") == "points":
+            candidate = configured(result["config"])
+            needs_stop = []
+            try:
+                check_changes(candidate)
+            except DomainError as exc:
+                needs_stop.append(exc.message)
+            return {**result, "needs_stop": needs_stop, "version": current["version"]}
         old = {d["id"]: d for d in current["devices"]}
         new = result["config"]["devices"]
         added = changed = deleted = 0
@@ -833,15 +841,13 @@ def create_app(data_dir=None, static_dir=None):
                 for d in devices
                 for p in d["points"]
             ]
-        if kind == "template":
-            devices = [thermal_template().model_dump()]
         config["settings"]["history_points"] = [
             key
             for key in config["settings"]["history_points"]
             if key in {p["id"] for d in devices for p in d["points"]}
         ]
         payload = {
-            "kind": "config" if kind in ("config", "template") else kind,
+            "kind": kind,
             "devices": devices,
             "settings": config["settings"],
             "rows": rows,

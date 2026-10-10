@@ -1283,3 +1283,21 @@ tr.selected > td:first-child {
 .chart-tooltip strong {
   display: block;
 }
+
+.settings-summary h3 {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.device-id-summary {
+  padding: 16px;
+  background: #f5f7fa;
+  border-radius: 8px;
+}
+.selectable-id {
+  user-select: all;
+  font-size: 14px;
+}
+.preserve-lines {
+  white-space: pre-wrap;
+}
