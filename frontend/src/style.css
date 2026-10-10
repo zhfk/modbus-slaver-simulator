@@ -199,6 +199,7 @@ pre {
 .sidebar-bottom {
   margin-top: auto;
   padding-top: 24px;
+  padding-bottom: 48px;
 }
 .sidebar-bottom > span {
   display: block;
@@ -551,9 +552,9 @@ pre {
 }
 .global-settings-trigger {
   position: fixed;
-  right: max(16px, env(safe-area-inset-right));
+  left: max(16px, env(safe-area-inset-left));
   bottom: max(16px, env(safe-area-inset-bottom));
-  z-index: 20;
+  z-index: 95;
   min-width: 88px;
   border-color: var(--ink);
   background: var(--surface);

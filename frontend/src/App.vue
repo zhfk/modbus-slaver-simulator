@@ -886,7 +886,8 @@ function closeGlobalSettingsMenu(returnFocus = false) {
 function repositionGlobalSettings() {
   const menu = document.getElementById("global-settings-menu");
   const trigger = document.getElementById("global-settings-trigger");
-  if (menu?.matches(":popover-open") && trigger) placePopover(menu, trigger);
+  if (menu?.matches(":popover-open") && trigger)
+    placePopover(menu, trigger, "start");
 }
 function prepareGlobalSettingsMenu() {
   const menu = document.getElementById("global-settings-menu");
@@ -956,7 +957,11 @@ function positionRowMenu(event: Event, id: string) {
   if (!trigger) return;
   placePopover(menu, trigger);
 }
-function placePopover(menu: HTMLElement, trigger: HTMLElement) {
+function placePopover(
+  menu: HTMLElement,
+  trigger: HTMLElement,
+  align: "start" | "end" = "end",
+) {
   const anchor = trigger.getBoundingClientRect(),
     popup = menu.getBoundingClientRect();
   const below = anchor.bottom + 6;
@@ -964,7 +969,8 @@ function placePopover(menu: HTMLElement, trigger: HTMLElement) {
     below + popup.height <= innerHeight - 8
       ? below
       : anchor.top - popup.height - 6;
-  menu.style.left = `${Math.max(8, Math.min(anchor.right - popup.width, innerWidth - popup.width - 8))}px`;
+  const left = align === "start" ? anchor.left : anchor.right - popup.width;
+  menu.style.left = `${Math.max(8, Math.min(left, innerWidth - popup.width - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(top, innerHeight - popup.height - 8))}px`;
 }
 function closeRuntimeStatus() {

@@ -26,7 +26,7 @@ async def check_global_settings(page, url, output):
         await page.set_viewport_size({"width": width, "height": 844})
         layout = await page.locator("main").bounding_box()
         anchor = await trigger.bounding_box()
-        assert abs(width - anchor["x"] - anchor["width"] - 16) < 1
+        assert abs(anchor["x"] - 16) < 1
         assert abs(844 - anchor["y"] - anchor["height"] - 16) < 1
         await trigger.click()
         await expect(menu).to_be_visible()
@@ -41,6 +41,7 @@ async def check_global_settings(page, url, output):
         ]
         assert await page.locator("main").bounding_box() == layout
         bounds = await menu.bounding_box()
+        assert abs(bounds["x"] - anchor["x"]) < 1
         assert 0 <= bounds["x"] and bounds["x"] + bounds["width"] <= width
         assert 0 <= bounds["y"] and bounds["y"] + bounds["height"] <= anchor["y"]
         await expect(menu.get_by_role("menuitem").nth(0)).to_be_focused()
@@ -65,6 +66,12 @@ async def check_global_settings(page, url, output):
         await trigger.click()
         await page.locator("main h2").first.click()
         await expect(menu).to_be_hidden()
+    await page.get_by_role("button", name="展开设备导航", exact=True).click()
+    await expect(page.locator(".sidebar")).to_be_visible()
+    await trigger.click()
+    await expect(menu).to_be_visible()
+    await expect(page.locator(".sidebar")).to_be_hidden()
+    await page.keyboard.press("Escape")
     await trigger.click()
     await page.set_viewport_size({"width": 390, "height": 300})
     await page.wait_for_timeout(100)
@@ -92,7 +99,7 @@ async def check_global_settings(page, url, output):
     await expect(trigger).to_be_focused()
     assert await (await page.request.get(url + "/api/config")).json() == before
     return [
-        "global settings at bottom-right, overlay without reflow, three widths, short viewport, resize/scroll, outside/toggle/Tab/Escape and arrow keys",
+        "global settings at bottom-left, overlay without reflow, three widths, short viewport, resize/scroll, outside/toggle/Tab/Escape and arrow keys",
         "global help/guide/storage work without devices and from help, preserve configuration and return focus to settings",
     ]
 
