@@ -664,7 +664,10 @@ class Storage:
                     key: device.restore_snapshot(content["devices"].get(key, {}))
                     for key, device in fresh.items()
                 }
-                runtime.devices = fresh
+                # Activate restored maps through the same path as configuration
+                # changes so all devices regain their audit callback. Inheriting
+                # the initial maps here would overwrite restored values/states.
+                runtime.apply(self.config, fresh, inherit=False)
                 self.restore_report = report
                 return
             except Exception as exc:

@@ -16,9 +16,17 @@ from simulator.excel import write_workbook
 from simulator.models import Point
 
 if __package__:
-    from .browser_help_check import check_help_and_history
+    from .browser_help_check import (
+        check_global_settings,
+        check_help_and_history,
+        open_global_setting,
+    )
 else:
-    from browser_help_check import check_help_and_history
+    from browser_help_check import (
+        check_global_settings,
+        check_help_and_history,
+        open_global_setting,
+    )
 
 
 async def run(url, output):
@@ -91,7 +99,8 @@ async def run(url, output):
         await page.route("**/*", offline_route)
         await page.goto(url)
         await expect(page.get_by_role("heading", name="还没有设备")).to_be_visible()
-        await page.get_by_role("button", name="存储与恢复设置", exact=True).click()
+        global_checks = await check_global_settings(page, url, output)
+        await open_global_setting(page, "存储与恢复设置")
         actual_health = await page.request.get(url + "/api/health")
         directory = (await actual_health.json())["storage"]["data_dir"]
         path_field = page.get_by_label("当前数据目录", exact=True)
@@ -1538,7 +1547,7 @@ async def run(url, output):
         assert (
             await page.request.post(url + f"/api/devices/{second['id']}/actions/stop")
         ).status == 200
-        new_checks = await check_help_and_history(page, url, output)
+        new_checks = global_checks + await check_help_and_history(page, url, output)
         assert not failures, failures
         await browser.close()
     report = {

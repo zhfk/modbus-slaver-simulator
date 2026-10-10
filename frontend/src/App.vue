@@ -103,6 +103,7 @@ const addTemplate = ref(true),
 const deviceMemory = new Map<string, Row>();
 const deviceMenuId = ref("");
 const deviceMenuOpen = ref(false);
+const globalSettingsOpen = ref(false);
 const menuDevice = computed(() =>
   devices.value.find((d) => d.id === deviceMenuId.value),
 );
@@ -820,6 +821,7 @@ function closeDeviceMenu(returnFocus = false) {
 }
 async function openDeviceMenu(event: MouseEvent | KeyboardEvent, key: string) {
   event.preventDefault();
+  closeGlobalSettingsMenu();
   closeRuntimeStatus();
   closeDeviceMenu();
   closeTrend();
@@ -843,9 +845,16 @@ async function openDeviceMenu(event: MouseEvent | KeyboardEvent, key: string) {
     ?.focus({ preventScroll: true });
 }
 function deviceMenuKeyboard(event: KeyboardEvent) {
+  contextMenuKeyboard(event, "device-context-menu", closeDeviceMenu);
+}
+function contextMenuKeyboard(
+  event: KeyboardEvent,
+  menuId: string,
+  close: (returnFocus?: boolean) => void,
+) {
   const items = [
     ...document.querySelectorAll<HTMLButtonElement>(
-      "#device-context-menu button:not(:disabled)",
+      `#${menuId} button:not(:disabled)`,
     ),
   ];
   const index = items.indexOf(document.activeElement as HTMLButtonElement);
@@ -858,8 +867,48 @@ function deviceMenuKeyboard(event: KeyboardEvent) {
           ? items.length - 1
           : (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) %
             items.length;
-    items[next]?.focus();
-  } else if (event.key === "Tab") closeDeviceMenu();
+    items[next]?.focus({ preventScroll: true });
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    close(true);
+  } else if (event.key === "Tab") close();
+}
+function closeGlobalSettingsMenu(returnFocus = false) {
+  const menu = document.getElementById("global-settings-menu");
+  if (!menu?.matches(":popover-open")) return;
+  menu.hidePopover();
+  if (returnFocus)
+    document
+      .getElementById("global-settings-trigger")
+      ?.focus({ preventScroll: true });
+}
+function repositionGlobalSettings() {
+  const menu = document.getElementById("global-settings-menu");
+  const trigger = document.getElementById("global-settings-trigger");
+  if (menu?.matches(":popover-open") && trigger) placePopover(menu, trigger);
+}
+function prepareGlobalSettingsMenu() {
+  const menu = document.getElementById("global-settings-menu");
+  if (!menu || modal.value || busy.value) return;
+  if (menu.matches(":popover-open")) return;
+  closeDeviceMenu();
+  closeRowMenus();
+  closeTrend();
+  closePacket();
+  closeRuntimeStatus();
+  showNav.value = false;
+}
+function globalSettingsToggled(event: Event) {
+  globalSettingsOpen.value = (event as ToggleEvent).newState === "open";
+  if (!globalSettingsOpen.value) return;
+  repositionGlobalSettings();
+}
+async function globalSettingsAction(kind: string) {
+  closeGlobalSettingsMenu(true);
+  if (kind === "help") await navigateHelp(true);
+  else if (kind === "guide") await startGuide();
+  else if (kind === "storage") await openStorage();
 }
 function dismissDeviceMenu(event: PointerEvent) {
   if (
@@ -899,6 +948,7 @@ function closeRowMenus(returnFocus = false) {
 }
 function positionRowMenu(event: Event, id: string) {
   if ((event as ToggleEvent).newState !== "open") return;
+  closeGlobalSettingsMenu();
   closeRuntimeStatus();
   closeDeviceMenu();
   const menu = event.target as HTMLElement;
@@ -923,6 +973,7 @@ function closeRuntimeStatus() {
 }
 function runtimeStatusToggled(event: Event) {
   if ((event as ToggleEvent).newState !== "open") return;
+  closeGlobalSettingsMenu();
   closeDeviceMenu();
   closeRowMenus();
   closeTrend();
@@ -946,6 +997,7 @@ function dismissRowMenus(event: Event) {
 }
 async function openModal(kind: string) {
   if (!(await closeModal())) return false;
+  closeGlobalSettingsMenu(true);
   closeTrend();
   closePacket();
   closeRuntimeStatus();
@@ -982,6 +1034,14 @@ async function closeModal() {
   return true;
 }
 function keydown(e: KeyboardEvent) {
+  if (
+    e.key === "Escape" &&
+    document.getElementById("global-settings-menu")?.matches(":popover-open")
+  ) {
+    e.preventDefault();
+    closeGlobalSettingsMenu(true);
+    return;
+  }
   if (
     e.key === "Escape" &&
     document.getElementById("packet-detail-popover")?.matches(":popover-open")
@@ -1814,7 +1874,7 @@ async function navigateHelp(open: boolean) {
   else
     (helpFocusReturn?.isConnected
       ? helpFocusReturn
-      : document.getElementById("help-trigger")
+      : document.getElementById("global-settings-trigger")
     )?.focus({ preventScroll: true });
   return true;
 }
@@ -1842,7 +1902,9 @@ async function startGuide() {
 async function closeGuide() {
   guideStep.value = null;
   await nextTick();
-  document.getElementById("guide-trigger")?.focus({ preventScroll: true });
+  document
+    .getElementById("global-settings-trigger")
+    ?.focus({ preventScroll: true });
 }
 function moveGuide(delta: number) {
   if (guideStep.value == null) return;
@@ -1910,6 +1972,7 @@ onMounted(async () => {
   document.addEventListener("scroll", dismissRowMenus, true);
   window.addEventListener("resize", dismissRowMenus);
   window.addEventListener("resize", repositionPacket);
+  window.addEventListener("resize", repositionGlobalSettings);
   window.addEventListener("blur", packetWindowBlur);
   try {
     await refreshConfig();
@@ -1933,6 +1996,7 @@ onUnmounted(() => {
   document.removeEventListener("scroll", dismissRowMenus, true);
   window.removeEventListener("resize", dismissRowMenus);
   window.removeEventListener("resize", repositionPacket);
+  window.removeEventListener("resize", repositionGlobalSettings);
   window.removeEventListener("blur", packetWindowBlur);
 });
 </script>
@@ -2041,12 +2105,11 @@ onUnmounted(() => {
         </div>
       </nav>
       <div class="sidebar-bottom">
-        <button @click="openStorage">存储与恢复设置</button
-        ><span>本机运行 · 后端提供页面</span>
+        <span>本机运行 · 后端提供页面</span>
       </div>
     </aside>
     <main v-if="helpOpen" :inert="Boolean(modal)">
-      <HelpPage @back="navigateHelp(false)" @guide="startGuide" />
+      <HelpPage @back="navigateHelp(false)" />
     </main>
     <main v-else :inert="Boolean(modal)">
       <header class="page-header">
@@ -2070,8 +2133,6 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="workspace-actions">
-          <button id="help-trigger" @click="navigateHelp(true)">使用帮助</button
-          ><button id="guide-trigger" @click="startGuide">使用引导</button>
           <button
             v-if="device"
             id="device-status-trigger"
@@ -2916,6 +2977,46 @@ onUnmounted(() => {
         查看通信诊断
       </button>
     </section>
+    <button
+      id="global-settings-trigger"
+      class="global-settings-trigger"
+      aria-label="全局设置"
+      aria-haspopup="menu"
+      aria-controls="global-settings-menu"
+      popovertarget="global-settings-menu"
+      :aria-expanded="globalSettingsOpen"
+      :disabled="Boolean(modal) || busy"
+      :inert="Boolean(modal)"
+      @click="prepareGlobalSettingsMenu"
+    >
+      设置
+    </button>
+    <div
+      id="global-settings-menu"
+      popover="auto"
+      class="global-settings-menu"
+      role="menu"
+      aria-label="全局设置"
+      @keydown="
+        contextMenuKeyboard(
+          $event,
+          'global-settings-menu',
+          closeGlobalSettingsMenu,
+        )
+      "
+      @toggle="globalSettingsToggled"
+    >
+      <strong>全局设置</strong>
+      <button role="menuitem" autofocus @click="globalSettingsAction('help')">
+        使用帮助
+      </button>
+      <button role="menuitem" @click="globalSettingsAction('guide')">
+        使用引导
+      </button>
+      <button role="menuitem" @click="globalSettingsAction('storage')">
+        存储与恢复设置
+      </button>
+    </div>
     <!-- Manual dismissal prevents the opening right-button release from closing the menu. -->
     <div
       id="device-context-menu"

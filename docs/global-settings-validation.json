@@ -1,0 +1,90 @@
+{
+  "checked_at": "2026-10-10 09:13",
+  "timezone": "Asia/Shanghai",
+  "base_commit": "0094725f4f8242f3db399e9cc839ec8772dd0150",
+  "scope": "source-only main; bottom-right global settings menu and assignment auditing after snapshot restore",
+  "global_menu": {
+    "entries": [
+      "使用帮助",
+      "使用引导",
+      "存储与恢复设置"
+    ],
+    "overlay_without_workspace_reflow": true,
+    "widths": [
+      1440,
+      1024,
+      390
+    ],
+    "short_viewport_height": 300,
+    "empty_devices_and_help_page_passed": true,
+    "outside_repeat_click_tab_escape_close": true,
+    "arrow_home_end_focus_navigation": true,
+    "return_focus_and_modal_isolation": true,
+    "feedback_does_not_cover_trigger": true,
+    "screenshots": "artifacts/browser-global-settings-snapshot-final/global-settings-*.png"
+  },
+  "backend": {
+    "passed": 234,
+    "seconds": 60.84,
+    "warnings": 1,
+    "assignment_regressions_total": 27,
+    "final_restore_state_version_checks_passed": 2
+  },
+  "frontend": {
+    "chart_tests_passed": 5,
+    "typecheck_build_passed": true,
+    "format_passed": true
+  },
+  "python_style": {
+    "format_passed": true,
+    "unused_imports_passed": true
+  },
+  "browser": {
+    "passed": true,
+    "checks": 65,
+    "page_errors": [],
+    "report": "artifacts/browser-global-settings-snapshot-final/browser.json"
+  },
+  "snapshot_restore_browser": {
+    "passed": true,
+    "same_empty_response_reproduced_before_fix": true,
+    "real_ui_fixed_states": [
+      "stopped",
+      "running",
+      "paused"
+    ],
+    "second_restart_records_preserved": 3,
+    "second_restart_new_records_total": 4,
+    "report": "artifacts/assignment-snapshot-restart-browser-final-menu/report.json"
+  },
+  "wheel": {
+    "installed_outside_checkout": true,
+    "passed": true,
+    "all_source_and_resources_byte_match": true,
+    "files_compared": 23,
+    "new_success_failure_manual_modbus_after_restore": true,
+    "second_restart_records_preserved": true,
+    "build_artifacts": "artifacts/wheel-global-settings-snapshot-final/"
+  },
+  "soak": {
+    "status": "passed",
+    "completed_seconds": 140.571,
+    "requests": 8322,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "5c8f326009ff83c4f5b0fefba569f269c045f6b9ec9aa3b3ef371bdbb132bf93",
+    "p99_ms": 23.347089998424053,
+    "failures": [],
+    "queue_dropped": 0,
+    "report": "artifacts/soak-global-settings-snapshot-final/results/stage-1/report.json"
+  },
+  "source_fingerprint_matches_current": true,
+  "release_published": false,
+  "remaining": [
+    "24/72 hour endurance",
+    "native rebuilds for new source features",
+    "target user desktop systems",
+    "actual LAN and firewall environment"
+  ]
+}

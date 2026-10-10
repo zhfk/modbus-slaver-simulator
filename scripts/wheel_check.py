@@ -69,8 +69,50 @@ def run(target):
                 restarted.get(f"/api/devices/{key}/assignments").json()["items"]
                 == history
             )
+            target_id = rows[1]["id"]
+            assert (
+                restarted.post(
+                    f"/api/devices/{key}/assign",
+                    json={"origin": "web", "items": [{"id": target_id, "value": 60.5}]},
+                ).status_code
+                == 200
+            )
+            after = restarted.get(f"/api/devices/{key}/assignments").json()["items"]
+            assert len(after) == 3 and after[0]["origin"] == "web"
+            assert after[0]["changes"][0]["before"] == 75.25
+            assert after[0]["changes"][0]["after"] == 60.5
+            assert (
+                restarted.post(
+                    f"/api/devices/{key}/assign",
+                    json={"items": [{"id": target_id, "value": "invalid"}]},
+                ).status_code
+                == 422
+            )
+            assert (
+                restarted.post(f"/api/devices/{key}/actions/start").status_code == 200
+            )
+            client = ModbusTcpClient("127.0.0.1", port=port, timeout=2)
+            try:
+                assert client.connect()
+                assert not client.write_registers(
+                    0, [0x4298, 0x8000], device_id=1
+                ).isError()
+                assert client.write_register(65535, 1, device_id=1).isError()
+            finally:
+                client.close()
+            after = restarted.get(f"/api/devices/{key}/assignments").json()["items"]
+            assert len(after) == 6
+            assert [row["outcome"] for row in after[:4]] == [
+                "failed",
+                "success",
+                "failed",
+                "success",
+            ]
+            assert after[1]["changes"][0]["after"] == 76.25
+        with TestClient(create_app(Path(data))) as again:
+            assert again.get(f"/api/devices/{key}/assignments").json()["items"] == after
     print(
-        "Installed wheel passed: SPA/help, local assets/fonts, API, real Modbus write/read, success/failure history and persistence"
+        "Installed wheel passed: SPA/help, local assets/fonts, API, real Modbus write/read, new success/failure assignments after snapshot restore and persistence"
     )
 
 

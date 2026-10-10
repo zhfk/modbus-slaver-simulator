@@ -1,0 +1,77 @@
+{
+  "checked_at": "2026-10-10 09:05",
+  "timezone": "Asia/Shanghai",
+  "base_commit": "0094725f4f8242f3db399e9cc839ec8772dd0150",
+  "scope": "source-only main; restore snapshot device maps through Runtime.apply with audit callbacks, preserving restored values and states",
+  "root_cause": {
+    "snapshot_restore_replaced_devices_without_audit_callback": true,
+    "user_same_empty_response_reproduced": true,
+    "before_fix_new_writes_regressions_failed": 2,
+    "after_fix_new_writes_regressions_passed": 2,
+    "primary_and_previous_snapshot_covered": true
+  },
+  "backend": {
+    "passed": 234,
+    "seconds": 60.84,
+    "warnings": 1,
+    "assignment_regressions_total": 27,
+    "final_state_and_config_version_followup_passed": 2
+  },
+  "frontend": {
+    "chart_tests_passed": 5,
+    "typecheck_build_passed": true
+  },
+  "python_style": {
+    "format_passed": true,
+    "unused_imports_passed": true
+  },
+  "browser": {
+    "passed": true,
+    "checks": 63,
+    "page_errors": [],
+    "report": "artifacts/browser-assignment-snapshot-fix/browser.json"
+  },
+  "browser_snapshot_restart": {
+    "passed": true,
+    "old_source_real_page_assignment_succeeded_but_history_empty": true,
+    "fixed_real_ui_device_states": [
+      "stopped",
+      "running",
+      "paused"
+    ],
+    "second_fixed_restart_records_preserved": 3,
+    "second_fixed_restart_new_records_total": 4,
+    "report": "artifacts/assignment-snapshot-restart-browser/report.json",
+    "no_fake_or_backfilled_records": true
+  },
+  "wheel": {
+    "installed_outside_checkout": true,
+    "passed": true,
+    "all_23_source_and_asset_files_match_checkout": true,
+    "new_success_failure_manual_and_modbus_after_restore": true,
+    "second_restart_persistence_passed": true,
+    "build_artifacts": "artifacts/wheel-assignment-snapshot-fix/"
+  },
+  "soak": {
+    "status": "passed",
+    "completed_seconds": 140.567,
+    "requests": 8319,
+    "ui_frames": 140,
+    "ui_reconnections": 5,
+    "device_restarts": 1,
+    "source_sha256": "e1618b4e1762f3c07d0da45a7bc9e20d1a2cf1c3dcd66510035933456818de4b",
+    "p99_ms": 15.33641001151409,
+    "failures": [],
+    "queue_dropped": 0,
+    "report": "artifacts/soak-assignment-snapshot-fix/results/stage-1/report.json"
+  },
+  "source_fingerprint_matches_current": true,
+  "release_published": false,
+  "remaining": [
+    "24/72 hour endurance",
+    "native rebuilds for new source features",
+    "target user desktop systems",
+    "actual LAN and firewall environment"
+  ],
+  "old_missing_operations_recoverable": false
+}

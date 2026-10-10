@@ -9,6 +9,94 @@ from playwright.async_api import expect
 from simulator.models import Device
 
 
+async def open_global_setting(page, name):
+    await page.get_by_role("button", name="全局设置", exact=True).click()
+    await (
+        page.get_by_role("menu", name="全局设置", exact=True)
+        .get_by_role("menuitem", name=name, exact=True)
+        .click()
+    )
+
+
+async def check_global_settings(page, url, output):
+    before = await (await page.request.get(url + "/api/config")).json()
+    trigger = page.get_by_role("button", name="全局设置", exact=True)
+    menu = page.get_by_role("menu", name="全局设置", exact=True)
+    for width in (1440, 1024, 390):
+        await page.set_viewport_size({"width": width, "height": 844})
+        layout = await page.locator("main").bounding_box()
+        anchor = await trigger.bounding_box()
+        assert abs(width - anchor["x"] - anchor["width"] - 16) < 1
+        assert abs(844 - anchor["y"] - anchor["height"] - 16) < 1
+        await trigger.click()
+        await expect(menu).to_be_visible()
+        await expect(trigger).to_have_attribute("aria-expanded", "true")
+        assert [
+            text.strip()
+            for text in await menu.get_by_role("menuitem").all_text_contents()
+        ] == [
+            "使用帮助",
+            "使用引导",
+            "存储与恢复设置",
+        ]
+        assert await page.locator("main").bounding_box() == layout
+        bounds = await menu.bounding_box()
+        assert 0 <= bounds["x"] and bounds["x"] + bounds["width"] <= width
+        assert 0 <= bounds["y"] and bounds["y"] + bounds["height"] <= anchor["y"]
+        await expect(menu.get_by_role("menuitem").nth(0)).to_be_focused()
+        await page.keyboard.press("ArrowUp")
+        await expect(menu.get_by_role("menuitem").nth(2)).to_be_focused()
+        await page.keyboard.press("Home")
+        await expect(menu.get_by_role("menuitem").nth(0)).to_be_focused()
+        await page.keyboard.press("ArrowDown")
+        await expect(menu.get_by_role("menuitem").nth(1)).to_be_focused()
+        await page.keyboard.press("End")
+        await expect(menu.get_by_role("menuitem").nth(2)).to_be_focused()
+        await page.screenshot(path=str(output / f"global-settings-{width}.png"))
+        await page.keyboard.press("Escape")
+        await expect(menu).to_be_hidden()
+        await expect(trigger).to_be_focused()
+        await trigger.click()
+        await page.keyboard.press("Tab")
+        await expect(menu).to_be_hidden()
+        await trigger.click()
+        await trigger.click()
+        await expect(menu).to_be_hidden()
+        await trigger.click()
+        await page.locator("main h2").first.click()
+        await expect(menu).to_be_hidden()
+    await trigger.click()
+    await page.set_viewport_size({"width": 390, "height": 300})
+    await page.wait_for_timeout(100)
+    bounds = await menu.bounding_box()
+    assert 0 <= bounds["x"] and bounds["x"] + bounds["width"] <= 390
+    assert 0 <= bounds["y"] and bounds["y"] + bounds["height"] <= 300
+    await page.keyboard.press("Escape")
+    await page.set_viewport_size({"width": 1440, "height": 1000})
+    await open_global_setting(page, "使用帮助")
+    await expect(page.locator(".help-view")).to_be_visible()
+    await trigger.click()
+    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    await expect(menu).to_be_visible()
+    await menu.get_by_role("menuitem", name="存储与恢复设置", exact=True).click()
+    await expect(
+        page.get_by_role("dialog", name="存储与恢复设置", exact=True)
+    ).to_be_visible()
+    await expect(trigger).to_be_disabled()
+    await page.keyboard.press("Escape")
+    await expect(trigger).to_be_focused()
+    await open_global_setting(page, "使用引导")
+    tour = page.get_by_role("dialog", name="使用引导", exact=True)
+    await expect(tour).to_be_visible()
+    await page.keyboard.press("Escape")
+    await expect(trigger).to_be_focused()
+    assert await (await page.request.get(url + "/api/config")).json() == before
+    return [
+        "global settings at bottom-right, overlay without reflow, three widths, short viewport, resize/scroll, outside/toggle/Tab/Escape and arrow keys",
+        "global help/guide/storage work without devices and from help, preserve configuration and return focus to settings",
+    ]
+
+
 async def check_help_and_history(page, url, output):
     checks = []
     current = await (await page.request.get(url + "/api/config")).json()
@@ -222,7 +310,7 @@ async def check_help_and_history(page, url, output):
     )
 
     before = await (await page.request.get(url + "/api/config")).json()
-    await page.get_by_role("button", name="使用帮助", exact=True).click()
+    await open_global_setting(page, "使用帮助")
     await expect(
         page.get_by_role("heading", name="使用帮助", exact=True)
     ).to_be_visible()
@@ -260,7 +348,7 @@ async def check_help_and_history(page, url, output):
     checks.append(
         "searchable full help, empty search state, direct /help refresh, section anchors and browser back at three widths"
     )
-    await page.get_by_role("button", name="开始使用引导", exact=True).click()
+    await open_global_setting(page, "使用引导")
     tour = page.get_by_role("dialog", name="使用引导", exact=True)
     await expect(tour).to_contain_text("1／9")
     await expect(tour.get_by_role("button", name="上一步", exact=True)).to_be_disabled()
@@ -283,7 +371,7 @@ async def check_help_and_history(page, url, output):
         await page.set_viewport_size(
             {"width": width, "height": 1000 if width > 500 else 844}
         )
-        await page.get_by_role("button", name="使用引导", exact=True).click()
+        await open_global_setting(page, "使用引导")
         await expect(tour).to_be_visible()
         bounds = await tour.bounding_box()
         assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width

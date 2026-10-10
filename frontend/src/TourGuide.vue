@@ -58,7 +58,7 @@ export const guideSteps = [
   },
   {
     title: "配置存储与恢复",
-    target: ".sidebar-bottom",
+    target: "#global-settings-trigger",
     action: "storage",
     label: "打开存储设置",
     text: "确认实际数据目录；按需要开启历史采样与恢复快照，设置周期、保留和预算。帮助页面可随时查阅全部功能，引导结束不会自动保存或启动。",

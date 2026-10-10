@@ -639,11 +639,11 @@ class Runtime:
     def prepare(self, config):
         return {d.id: DeviceRuntime(d) for d in config.devices}
 
-    def apply(self, config, prepared=None):
+    def apply(self, config, prepared=None, *, inherit=True):
         previous = self.devices
         candidates = prepared if prepared is not None else self.prepare(config)
         for key, device in candidates.items():
-            if key in previous:
+            if inherit and key in previous:
                 device.inherit(previous[key])
             device.audit_callback = self.audit
         self.devices = candidates

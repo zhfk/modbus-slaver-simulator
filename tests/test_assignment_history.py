@@ -140,6 +140,75 @@ def test_history_survives_clean_restart_with_sampling_disabled(tmp_path):
         assert not history(restarted)["warning"]
 
 
+@pytest.mark.parametrize("fallback_snapshot", [False, True])
+def test_new_writes_after_snapshot_restore_are_recorded(tmp_path, fallback_snapshot):
+    from pymodbus.client import ModbusTcpClient
+
+    config = Configuration(
+        devices=[
+            Device(
+                id="d",
+                port=port(),
+                points=[Point(id="p", name="点", initial=7, writable=True)],
+            )
+        ]
+    )
+    with TestClient(create_app(tmp_path)) as client:
+        assert client.put("/api/config", json=config.model_dump()).status_code == 200
+        assert assign(client, 37, origin="web").status_code == 200
+    snapshot = tmp_path / "snapshot.json"
+    assert snapshot.exists()
+    if fallback_snapshot:
+        (tmp_path / "snapshot.previous.json").write_bytes(snapshot.read_bytes())
+        snapshot.write_text("broken", encoding="utf-8")
+
+    with TestClient(create_app(tmp_path)) as restarted:
+        # Restored values must survive activation, not be replaced by initials.
+        assert restarted.app.state.runtime.get("d").value("p") == 37
+        assert restarted.app.state.runtime.get("d").states["p"].hold
+        assert assign(restarted, 41, origin="web").status_code == 200
+        rows = history(restarted)["items"]
+        assert len(rows) == 2
+        assert rows[0]["origin"] == "web"
+        assert rows[0]["config_version"] == 1
+        assert (rows[0]["changes"][0]["before"], rows[0]["changes"][0]["after"]) == (
+            37,
+            41,
+        )
+        assert assign(restarted, 65536).status_code == 422
+        assert restarted.post("/api/devices/d/actions/start").status_code == 200
+        modbus = ModbusTcpClient("127.0.0.1", port=config.devices[0].port, timeout=2)
+        try:
+            assert modbus.connect()
+            assert not modbus.write_register(0, 42, device_id=1).isError()
+            assert modbus.write_register(65535, 1, device_id=1).isError()
+        finally:
+            modbus.close()
+        rows = history(restarted)["items"]
+        assert len(rows) == 5
+        assert [row["origin"] for row in rows] == [
+            "modbus",
+            "modbus",
+            "api",
+            "web",
+            "web",
+        ]
+        assert [row["outcome"] for row in rows] == [
+            "failed",
+            "success",
+            "failed",
+            "success",
+            "success",
+        ]
+        assert rows[1]["changes"][0]["after"] == 42
+        assert not history(restarted)["warning"]
+
+    with TestClient(create_app(tmp_path)) as again:
+        assert history(again)["items"] == rows
+        assert assign(again, 53, origin="web").status_code == 200
+        assert len(history(again)["items"]) == 6
+
+
 @pytest.mark.parametrize(
     "data",
     [

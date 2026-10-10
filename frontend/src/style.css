@@ -200,17 +200,13 @@ pre {
   margin-top: auto;
   padding-top: 24px;
 }
-.sidebar-bottom button {
-  width: 100%;
-  white-space: normal;
-}
 .sidebar-bottom > span {
   display: block;
   color: var(--secondary);
   margin: 12px 4px;
 }
 .app-shell > main {
-  padding: 28px 24px;
+  padding: 28px 24px 80px;
   min-width: 0;
   flex: 1;
 }
@@ -317,19 +313,21 @@ pre {
 .feedback-popover {
   position: fixed;
   inset: auto;
-  bottom: 16px;
+  bottom: 76px;
   right: 16px;
   margin: 0;
   padding: 0;
   width: 460px;
   max-width: calc(100vw - 32px);
-  max-height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 92px);
   border: 0;
   background: transparent;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 .drawer .feedback-popover {
+  bottom: 16px;
+  max-height: calc(100dvh - 32px);
   left: 16px;
   right: auto;
 }
@@ -509,7 +507,8 @@ pre {
 .point-menu,
 .trend-popover,
 .packet-popover,
-.device-context-menu {
+.device-context-menu,
+.global-settings-menu {
   position: fixed;
   inset: auto;
   margin: 0;
@@ -528,23 +527,36 @@ pre {
   flex-direction: column;
   gap: 4px;
 }
-.device-context-menu:popover-open {
+.device-context-menu:popover-open,
+.global-settings-menu:popover-open {
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
 .device-context-menu > strong,
-.device-context-menu > span {
+.device-context-menu > span,
+.global-settings-menu > strong {
   padding: 4px 10px;
   overflow-wrap: anywhere;
 }
-.device-context-menu button {
+.device-context-menu button,
+.global-settings-menu button {
   text-align: left;
   border-color: transparent;
   flex-shrink: 0;
 }
-.device-context-menu button:hover:not(:disabled) {
+.device-context-menu button:hover:not(:disabled),
+.global-settings-menu button:hover:not(:disabled) {
   border-color: var(--ink);
+}
+.global-settings-trigger {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 20;
+  min-width: 88px;
+  border-color: var(--ink);
+  background: var(--surface);
 }
 .point-menu button {
   border-color: transparent;
@@ -948,7 +960,7 @@ tr.selected > td:first-child {
 }
 @media (max-width: 600px) {
   .app-shell > main {
-    padding: 16px 12px;
+    padding: 16px 12px 80px;
   }
   .page-header {
     gap: 12px;
