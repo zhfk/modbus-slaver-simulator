@@ -204,7 +204,6 @@ class DeviceRuntime:
             change["after_raw"] = self.raw(change["id"])
         self.audit_callback(
             {
-                "id": f"{time.time_ns():020d}-{uuid.uuid4().hex}",
                 "time": time.time(),
                 "kind": kind,
                 "device": self.config.id,
@@ -622,6 +621,7 @@ class DeviceRuntime:
 
 class Runtime:
     def __init__(self):
+        self.last_assignment_ns = 0
         self.devices = {}
         self.diagnostics = ByteRing(1000, 4 * 1024 * 1024)
         self.events = ByteRing(1000, 1024 * 1024)
@@ -681,6 +681,10 @@ class Runtime:
 
     def audit(self, event):
         if event.get("kind") in ("manual", "external_write"):
+            # Windows can return the same clock tick for many writes. Keep
+            # the tie breaker ordered across devices and online map changes.
+            self.last_assignment_ns = max(time.time_ns(), self.last_assignment_ns + 1)
+            event["id"] = f"{self.last_assignment_ns:020d}-{uuid.uuid4().hex}"
             event["config_version"] = self.config_version
             device = self.devices.get(event["device"])
             if device:

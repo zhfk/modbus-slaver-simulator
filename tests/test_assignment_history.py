@@ -414,6 +414,40 @@ async def test_delayed_rejected_write_records_current_point_metadata():
 
 
 @pytest.mark.asyncio
+async def test_equal_clock_ticks_keep_latest_writes_in_order_after_flush_and_restart(
+    tmp_path, monkeypatch
+):
+    store, runtime = Storage(tmp_path), Runtime()
+    await store.open()
+    runtime.on_event = lambda row: store.enqueue("event", row)
+    config = Configuration(devices=[Device(id="d", points=[Point(id="p", name="点")])])
+    await store.commit(config, runtime)
+    monkeypatch.setattr("simulator.runtime.time.time", lambda: 1791599406.6333652)
+    monkeypatch.setattr("simulator.runtime.time.time_ns", lambda: 1791599406633365200)
+    try:
+        for value in range(2000):
+            if value == 1000:
+                runtime.apply(config)  # Replacing the map must retain ordering.
+            runtime.get("d").assign([{"id": "p", "value": value}])
+        expected = list(reversed(runtime.get("d").assignments))
+        assert [r["changes"][0]["after"] for r in expected] == list(
+            reversed(range(1900, 2000))
+        )
+        assert (
+            sorted(expected, key=lambda r: (r["time"], r["id"]), reverse=True)
+            == expected
+        )
+    finally:
+        await store.close(runtime)  # Drain more than one batch.
+    recovered = Storage(tmp_path)
+    await recovered.open()
+    try:
+        assert await recovered.assignments("d") == expected
+    finally:
+        await recovered.close(runtime)
+
+
+@pytest.mark.asyncio
 async def test_actual_disk_budget_pruning_reports_history_gap(tmp_path):
     store, runtime = Storage(tmp_path), Runtime()
     await store.open()

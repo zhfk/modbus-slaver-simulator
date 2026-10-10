@@ -1,6 +1,7 @@
 """Keep the failure tail visible in Actions annotations for native builds."""
 
 import os
+import re
 import subprocess
 import sys
 
@@ -15,7 +16,16 @@ if __name__ == "__main__":
     )
     print(result.stdout, end="")
     if result.returncode:
-        tail = result.stdout[-16000:]
+        summary = re.search(
+            r"=+ short test summary info =+\n(.*?)(?=\n=+)",
+            result.stdout,
+            re.DOTALL,
+        )
+        tail = (
+            summary.group(1)[:3500] + "\n\n" + result.stdout[-3500:]
+            if summary
+            else result.stdout[-7000:]
+        )
         annotation = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print("::error title=Native release check failed::" + annotation)
         if os.environ.get("GITHUB_STEP_SUMMARY"):

@@ -1,11 +1,12 @@
 {
-  "version": "0.2.0rc8",
-  "verified_at": "2026-10-10T10:28:34.919207+08:00",
-  "implementation_parent": "68492dd",
-  "source_fingerprint": "aeab3e305c24e4be599d785371294b13fd61c12ad76835d956740f03d02c2517",
+  "version": "0.2.0rc9",
+  "verified_at": "2026-10-10T10:38:04.827132+08:00",
+  "implementation_parent": "a8fdd61",
+  "source_fingerprint": "212ca4ba8fe796cb531ff812c8511efd3c6573ceb5583fbc8d86f5571c32a6e8",
   "backend": {
-    "passed": 271,
-    "seconds": 66.71,
+    "passed": 272,
+    "seconds": 67.56,
+    "assignment_regressions_passed": 28,
     "warning": "Existing Starlette/httpx TestClient deprecation warning"
   },
   "frontend": {
@@ -90,13 +91,13 @@
   "wheel": {
     "passed": true,
     "files_matched": 25,
-    "source_fingerprint": "aeab3e305c24e4be599d785371294b13fd61c12ad76835d956740f03d02c2517",
+    "source_fingerprint": "212ca4ba8fe796cb531ff812c8511efd3c6573ceb5583fbc8d86f5571c32a6e8",
     "installed_outside_checkout": true
   },
   "local_frozen": {
     "passed": true,
-    "version": "0.2.0rc8",
-    "checked_at_utc": "2026-10-10T02:26:20.060374+00:00",
+    "version": "0.2.0rc9",
+    "checked_at_utc": "2026-10-10T02:35:28.960408+00:00",
     "checks": [
       "bundled page/assets/fonts, deep links and actual data directory without system Python/PATH",
       "three devices share one endpoint with isolated Unit IDs, values and stop",
@@ -123,56 +124,39 @@
   },
   "short_soak": {
     "status": "passed",
-    "completed_seconds": 140.864,
-    "requests": 8283,
+    "completed_seconds": 140.635,
+    "requests": 8328,
     "ui_frames": 140,
     "ui_reconnections": 5,
     "device_restarts": 1,
-    "p99_ms": 34.91733700502664,
+    "p99_ms": 21.961174003081396,
     "failures": [],
     "latest": {
-      "seconds": 139.97,
-      "rss": 131579904,
-      "cpu_one_core_percent": 10.9,
+      "seconds": 139.61,
+      "rss": 128548864,
+      "cpu_one_core_percent": 11.89,
       "threads": 5,
       "handles": 25,
       "tasks": 10,
-      "loop_delay_ms": 0.11475497740320861,
+      "loop_delay_ms": 0.11804999667219818,
       "queue_count": 6,
-      "queue_bytes": 4014,
+      "queue_bytes": 4015,
       "dropped": 0,
-      "disk_bytes": 16029179,
-      "p95_ms": 6.73770098364912,
-      "p99_ms": 34.91733700502664
+      "disk_bytes": 16029611,
+      "p95_ms": 5.5400859855581075,
+      "p99_ms": 21.961174003081396
     }
   },
   "native_release": {
-    "status": "failed; publication skipped",
-    "run_url": "https://github.com/zhfk/modbus-slaver-simulator/actions/runs/38017099463",
-    "run_id": 38017099463,
-    "source_commit": "a8fdd6173f50eb14aa0407d1f89824d5ccb2e79a",
-    "jobs": [
-      {
-        "name": "build (windows-2022, windows, x86_64)",
-        "conclusion": "failure"
-      },
-      {
-        "name": "build (macos-15, macos, arm64)",
-        "conclusion": "success"
-      },
-      {
-        "name": "build (ubuntu-22.04, linux, x86_64)",
-        "conclusion": "success"
-      },
-      {
-        "name": "publish",
-        "conclusion": "skipped"
-      }
-    ],
-    "reason": "Windows assignment history ordering differs when multiple writes share the same clock tick; reproduced with fixed clocks and addressed for rc9"
+    "status": "pending native CI and official downloads"
   },
   "limits": [
     "24/72-hour endurance remains unpassed",
     "Windows/macOS user desktop and second-host LAN remain unverified"
-  ]
+  ],
+  "assignment_ordering": {
+    "reproduced": "Identical Windows clock ticks sorted by random UUID scramble submission order",
+    "fix": "Runtime monotonic operation-ID prefix; real wall timestamps unchanged; retained across online runtime map changes",
+    "regression": "2000 equal-clock writes, online map replacement, multi-batch drain and database restart return latest100 in exact submission order"
+  }
 }

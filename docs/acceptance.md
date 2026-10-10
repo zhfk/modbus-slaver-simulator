@@ -24,6 +24,17 @@
 | 目标 Windows 桌面系统 | Windows Server 2022 x64 原生 CI 完成回归及独立包检查；目标 Windows 10／11 与服务账户仍须另测 | 原生 CI 通过，用户桌面环境未验收 |
 | 另一台电脑通过实际 LAN 访问 | 支持实际网卡监听；当前用独立进程的 TCP 客户端验证 | 未在第二台电脑及目标防火墙环境执行 |
 
+## 0.2.0rc9 赋值顺序修复与发布验收
+
+验证时间：2026-10-10T10:38:04.827132+08:00；证据：[release-rc9-validation.json](release-rc9-validation.json)。
+
+- rc8的Windows回归失败已在固定时钟下复现：相同时刻多次赋值按随机UUID排序，落盘保留集合与按提交顺序的缓存不同。rc9使用运行时单调递增操作ID前缀，保留真实墙上时钟时间；在线点位映射不重置顺序。新增2000次等时写入、在线更新、跨批次排空及重启后最近100条精确倒序回归，不删除或伪造旧记录。
+- 后端 **272项通过**，67.56秒；赋值回归 **28项通过**。前端 **5项通过**、构建及格式检查通过；完整Chromium **69项通过**，无脚本错误。报告 `artifacts/browser-release-rc9-final/browser.json`。
+- 仓库外wheel全部 **25个应用文件**与当前资源一致，本地冻结Linux包 **8组检查通过**，覆盖三设备TCP、浮点WebSocket、Excel工作器、单窗格20列主机点表、同目录重启启停／暂停及离线维护；产物在 `artifacts/wheel-release-rc9-final/` 与 `artifacts/release-rc9-native-local/`，本地包不是官方Ubuntu发布包。
+- 最终源码混合负载 **140.635秒、8328次请求**、140份快照、5次订阅重连和1次设备重启通过，P99 21.961ms，无失败或队列丢弃。报告 `artifacts/soak-release-rc9-final/results/stage-1/report.json`；指纹 `212ca4ba8fe796cb531ff812c8511efd3c6573ceb5583fbc8d86f5571c32a6e8`。
+- 三平台原生CI及正式下载校验待执行，完成后追加实测结果；rc8未发布，发布代码不强改旧标签。长期耐久和目标用户机器仍待验收。
+
+
 ## 0.2.0rc8 主机点表精简与发布验收
 
 验证时间：2026-10-10T10:28:34.919207+08:00。机器可读证据：[release-rc8-validation.json](release-rc8-validation.json)。
@@ -32,7 +43,7 @@
 - 后端 **271项通过**，66.71秒；前端 **5项通过**及TypeScript／Vite构建通过。Chromium完整 **69项通过**，无脚本错误；报告 `artifacts/browser-release-rc8-final/browser.json`，包含三种宽度和实际20列点表下载。
 - 仓库外 wheel 和本地冻结Linux包 **8组检查通过**，覆盖真实三Unit读写、WebSocket、Excel子进程、20列点表、14列模板、同目录重启启停／暂停及Float32值恢复、离线维护。冻结检查已修正旧整数602断言，使用实际Float32原始寄存器；产物分别在 `artifacts/wheel-release-rc8-final/`、`artifacts/release-rc8-native-local/`，本地包不是官方Ubuntu发布包。
 - 最终源码短时混合负载 **140.864秒、8283次请求**、140份快照、5次订阅重连和1次设备重启通过，P99 34.917ms，无失败和队列丢弃；报告 `artifacts/soak-release-rc8-final/results/stage-1/report.json`，源码指纹 `aeab3e305c24e4be599d785371294b13fd61c12ad76835d956740f03d02c2517`。
-- 三平台原生CI和官方Release下载校验待执行，结果将在本节及JSON中追加，不将本地Linux构建冒充三平台通过。每平台检查报告将随Release发布；长期耐久、目标用户桌面及跨机器LAN仍待验收。
+- rc8原生CI：Linux和macOS构建／检查通过，Windows后端赋值历史排序回归失败，发布任务跳过；未发布rc8。日志表现为同一时钟刻度的多次写入按随机UUID打乱顺序，固定时钟复现已证实。后续rc9改为运行时单调操作ID并增加2000条等时写入／在线映射／落盘重启回归。CI：https://github.com/zhfk/modbus-slaver-simulator/actions/runs/38017099463 。不沿用rc8的源码指纹为rc9验收。
 
 
 ## 模板视图修正、设备重启状态与 Modbus 点表（当前 main）

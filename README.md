@@ -10,17 +10,17 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 | [源码启动](#源码启动) | 修改代码、本地开发和自行构建 | Python 3.12、Node.js 22.12+、Git |
 | [wheel 部署](#wheel-部署需-python与升级) | 已有 Python 环境，自行分发安装包 | Python 3.12 和对应平台依赖 |
 
-当前版本为 `0.2.0rc8` 功能预发布，包含主机接入点表、重启启停恢复和当前管理界面功能。三平台构建与下载校验结果见 [验收记录](docs/acceptance.md)；长期运行验收尚未通过。
+当前版本为 `0.2.0rc9` 功能预发布，包含主机接入点表、重启启停恢复和当前管理界面功能。三平台构建与下载校验结果见 [验收记录](docs/acceptance.md)；长期运行验收尚未通过。
 
 ## Release 包启动（推荐）
 
-在 [v0.2.0rc8 下载页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc8) 的 **Assets** 中选择对应平台包。包内包含 Python、应用依赖、前端页面和离线字体；不要下载 `Source code` 代替独立运行包。完整解压并保留 `_internal/` 目录，不能只复制可执行文件。
+在 [v0.2.0rc9 下载页](https://github.com/zhfk/modbus-slaver-simulator/releases/tag/v0.2.0rc9) 的 **Assets** 中选择对应平台包。包内包含 Python、应用依赖、前端页面和离线字体；不要下载 `Source code` 代替独立运行包。完整解压并保留 `_internal/` 目录，不能只复制可执行文件。
 
 | 平台 | 下载文件 | 兼容与验证范围 |
 | --- | --- | --- |
-| Linux x86_64 | [modbus-simulator-0.2.0rc8-linux-x86_64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc8/modbus-simulator-0.2.0rc8-linux-x86_64.tar.gz) | Ubuntu 22.04 原生验证，glibc 2.35+；不支持 Alpine/musl |
-| Windows x64 | [modbus-simulator-0.2.0rc8-windows-x86_64.zip](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc8/modbus-simulator-0.2.0rc8-windows-x86_64.zip) | Windows Server 2022 原生验证，目标 Windows 10／11 尚须实机验收 |
-| macOS Apple Silicon | [modbus-simulator-0.2.0rc8-macos-arm64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc8/modbus-simulator-0.2.0rc8-macos-arm64.tar.gz) | macOS 15 原生验证，更老系统未验证；不提供 Intel 版本 |
+| Linux x86_64 | [modbus-simulator-0.2.0rc9-linux-x86_64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc9/modbus-simulator-0.2.0rc9-linux-x86_64.tar.gz) | Ubuntu 22.04 原生验证，glibc 2.35+；不支持 Alpine/musl |
+| Windows x64 | [modbus-simulator-0.2.0rc9-windows-x86_64.zip](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc9/modbus-simulator-0.2.0rc9-windows-x86_64.zip) | Windows Server 2022 原生验证，目标 Windows 10／11 尚须实机验收 |
+| macOS Apple Silicon | [modbus-simulator-0.2.0rc9-macos-arm64.tar.gz](https://github.com/zhfk/modbus-slaver-simulator/releases/download/v0.2.0rc9/modbus-simulator-0.2.0rc9-macos-arm64.tar.gz) | macOS 15 原生验证，更老系统未验证；不提供 Intel 版本 |
 
 下载页的 `SHA256SUMS.txt` 可用于核对文件完整性。
 
@@ -29,8 +29,8 @@ Vue 3 + TypeScript 管理界面，Python/FastAPI 管理服务与共享内存 Mod
 在下载文件所在目录执行：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc8-linux-x86_64.tar.gz
-cd modbus-simulator-0.2.0rc8-linux-x86_64
+tar -xzf modbus-simulator-0.2.0rc9-linux-x86_64.tar.gz
+cd modbus-simulator-0.2.0rc9-linux-x86_64
 ./start.sh
 ```
 
@@ -39,8 +39,8 @@ cd modbus-simulator-0.2.0rc8-linux-x86_64
 解压 zip，进入包目录双击 `start.cmd`。也可在下载目录打开 PowerShell 执行：
 
 ```powershell
-Expand-Archive -Path .\modbus-simulator-0.2.0rc8-windows-x86_64.zip -DestinationPath .
-Set-Location .\modbus-simulator-0.2.0rc8-windows-x86_64
+Expand-Archive -Path .\modbus-simulator-0.2.0rc9-windows-x86_64.zip -DestinationPath .
+Set-Location .\modbus-simulator-0.2.0rc9-windows-x86_64
 .\start.cmd
 ```
 
@@ -49,8 +49,8 @@ Set-Location .\modbus-simulator-0.2.0rc8-windows-x86_64
 在下载文件所在目录执行：
 
 ```bash
-tar -xzf modbus-simulator-0.2.0rc8-macos-arm64.tar.gz
-cd modbus-simulator-0.2.0rc8-macos-arm64
+tar -xzf modbus-simulator-0.2.0rc9-macos-arm64.tar.gz
+cd modbus-simulator-0.2.0rc9-macos-arm64
 ./start.command
 ```
 
@@ -138,11 +138,11 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 3. 启动设备，再连接外部 Modbus TCP 客户端。右击左侧设备卡片，选择“启动设备”，或勾选多台设备批量启动。
 4. 在点位表格中赋值、配置策略、查看趋势和真实通信记录。
 
-最新源码保持设备列表原位置，将设备信息、启动、停止、编辑、重置和删除统一放入设备卡片的右键菜单，并保留暂停／恢复策略。点击卡片“⋯”或聚焦后按 Shift+F10 也能打开。菜单只操作对应卡片的设备，启动／停止等操作不切换当前查看设备；重置支持运行中执行，删除整台设备仍须先停止，确认中会显示设备名称。菜单不撑开卡片或移动主页面，支持上下键、Home／End、Esc 和点击外侧关闭。此交互包含在 rc8 独立包中，源码更新后须重新构建前端并重启后端。
+最新源码保持设备列表原位置，将设备信息、启动、停止、编辑、重置和删除统一放入设备卡片的右键菜单，并保留暂停／恢复策略。点击卡片“⋯”或聚焦后按 Shift+F10 也能打开。菜单只操作对应卡片的设备，启动／停止等操作不切换当前查看设备；重置支持运行中执行，删除整台设备仍须先停止，确认中会显示设备名称。菜单不撑开卡片或移动主页面，支持上下键、Home／End、Esc 和点击外侧关闭。此交互包含在 rc9 独立包中，源码更新后须重新构建前端并重启后端。
 
 设备卡片旁可勾选设备，工作区提供全选、批量启动／批量停止。仅操作勾选的设备，逐台执行；某台端口占用或其他失败不会阻止后续设备，结果气泡列出每台结果，已处于目标状态的设备跳过。批量停止须确认设备清单；执行期间禁用重复提交和选择变更，并拒绝配置修改。批量启动只启动通信服务，保留设备原有的策略暂停状态。
 
-最新源码的运行状态从标题栏“运行状态”按钮打开气泡，展示通信、策略、连接及刷新时间。操作结果和校验信息同样浮动显示，页面与抽屉不会被提示撑高；普通提示约 6 秒后关闭，悬停或聚焦可暂停，失败和校验信息保留至关闭或更新。关闭校验气泡保留草稿；Excel 校验可重新查看并下载完整错误清单。此改动包含在 rc8 下载包中。
+最新源码的运行状态从标题栏“运行状态”按钮打开气泡，展示通信、策略、连接及刷新时间。操作结果和校验信息同样浮动显示，页面与抽屉不会被提示撑高；普通提示约 6 秒后关闭，悬停或聚焦可暂停，失败和校验信息保留至关闭或更新。关闭校验气泡保留草稿；Excel 校验可重新查看并下载完整错误清单。此改动包含在 rc9 下载包中。
 
 多设备配置示例：
 
@@ -174,7 +174,7 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 4. 固定值使用初始值；正弦使用区间中点和半区间幅度、60 秒周期；斜坡在上下限间 60 秒循环，游走步长为区间的 1%。Bool 支持无策略、固定值、均匀随机，始终生成 0／1。表达式、温控等复杂策略在页面配置。
 5. 解析、查看校验预览并应用。运行中可导入，兼容点位保留当前值，新增或重映射使用初始值；初始值属性更新不等于立即赋值。导入行未提供的高级属性使用默认值，包括大小端 big、写入模式保持；保留高级配置请使用完整配置导出。
 
-完整配置导出保留原“格式／设备／点位”三个 Sheet、稳定 ID 和全部属性，仍可按新增、ID 更新或显式替换导回。导入方式选择仅作用于完整配置文件；单 Sheet 模板始终按设备 ID＋名称新增／更新。快照和历史数据不能作为配置导入。上述功能包含在 rc8 下载包中；源码更新须重新构建前端并重启后端。
+完整配置导出保留原“格式／设备／点位”三个 Sheet、稳定 ID 和全部属性，仍可按新增、ID 更新或显式替换导回。导入方式选择仅作用于完整配置文件；单 Sheet 模板始终按设备 ID＋名称新增／更新。快照和历史数据不能作为配置导入。上述功能包含在 rc9 下载包中；源码更新须重新构建前端并重启后端。
 
 ## Modbus 点表导出
 
@@ -182,7 +182,7 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 
 点表共 20 列，包含设备名称、监听 IP／端口／Unit ID、点位名称、中文数据区、实际启用的读写功能码、协议地址、六位参考编号、占用长度、数据类型、字节序／字序、倍率／偏移／单位、有效主机可写权限及说明，按数据区和地址排序；不包含设备 ID、分组及初始值。**请求使用从 0 开始的协议地址**；保持寄存器地址 0 对应参考编号 `400001`，常见五位写法是 `40001`。参考编号是对照标记，不是请求地址。Float32 占两个 16 位寄存器、Float64 占四个；线圈占位。表头批注说明换算和地址约定，文本编号保留前导零；点表只有第1行表头，使用单窗格，不冻结表头，避免打开时冻结区域短暂重复显示。Modbus 定义协议和地址区，没有唯一通用的 Excel 表格标准；主机按表中 IP、端口、Unit ID 建立 Modbus TCP 连接，再用启用的功能码、零基协议地址和占用长度读写，按字节序／字序、倍率与偏移解析数值。监听 IP 为 `0.0.0.0`／`::` 时，主机填写服务所在电脑实际可访问的 IP。
 
-完整配置导出仍用于备份与导入；协议点表不能导入配置，也不包含实时值，当前值使用“导出当前快照”。此功能包含在 rc8 下载包中。
+完整配置导出仍用于备份与导入；协议点表不能导入配置，也不包含实时值，当前值使用“导出当前快照”。此功能包含在 rc9 下载包中。
 
 ## 功能
 
@@ -226,11 +226,11 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 
 查看人工操作记录：选择对应设备，在点位行点击“赋值”并“应用当前值”，随后打开设备的“赋值历史”页签。“历史数据”窗口查询的是按周期采样的值；编辑初始值或策略并保存也不属于当前值赋值。赋值历史首次读取时显示读取状态，成功返回空列表才显示“暂无赋值记录”；读取失败以浮动气泡说明原因，保留已经显示的记录，可点击“刷新记录”重试。若提示当前服务未提供接口，应核对浏览器访问端口、实际运行进程与后端版本，前端构建成功不等于所访问的后端接口已更新。
 
-当前 main 已修复启动恢复快照后新赋值不记录的问题：恢复的设备重新绑定审计回调，保留恢复值与保持状态，之后的页面／API／Modbus 成功和失败写入均正常记录。源码用户拉取最新代码后，用原数据目录重启后端；未生成的旧操作记录无法补回，不需要删除数据目录或快照。此修复包含在 rc8 下载包中。
+当前 main 已修复启动恢复快照后新赋值不记录的问题：恢复的设备重新绑定审计回调，保留恢复值与保持状态，之后的页面／API／Modbus 成功和失败写入均正常记录。源码用户拉取最新代码后，用原数据目录重启后端；未生成的旧操作记录无法补回，不需要删除数据目录或快照。此修复包含在 rc9 下载包中。
 
 左下角“设置”打开全局浮动菜单，统一提供“使用帮助”“使用引导”和“存储与恢复设置”，不依赖当前设备，设备列表为空时仍可使用；不再在设备标题和导航区分别显示三个按钮。菜单在按钮上方向右展开，不移动页面，点击外侧／再次点击设置／Esc 关闭，方向键及 Home／End 选择菜单项。关闭帮助、引导或存储抽屉后焦点返回设置入口，操作提示气泡避开设置按钮。
 
-菜单中的“使用帮助”打开可搜索的功能说明，亦可直接访问或刷新 `/help`；“使用引导”启动 9 步浮动操作指引，支持上一步、下一步、退出和 Esc。对应按钮打开实际表单或页签，由用户显式保存／启动／赋值，浏览步骤不会自动改变数据。抽屉关闭后回到原引导步骤，帮助退出保留工作区位置。上述赋值历史、帮助／引导、全局设置菜单及表达式标记包含在 rc8 下载包中。
+菜单中的“使用帮助”打开可搜索的功能说明，亦可直接访问或刷新 `/help`；“使用引导”启动 9 步浮动操作指引，支持上一步、下一步、退出和 Esc。对应按钮打开实际表单或页签，由用户显式保存／启动／赋值，浏览步骤不会自动改变数据。抽屉关闭后回到原引导步骤，帮助退出保留工作区位置。上述赋值历史、帮助／引导、全局设置菜单及表达式标记包含在 rc9 下载包中。
 
 通信诊断点击结果打开浮动报文详情，展示点击时的请求／响应 HEX、事务 ID、Unit、功能码与结果；无响应会明确标注。详情采用独立快照，不因每秒刷新、插入新记录或原记录移出最近 100 条列表而关闭或替换。气泡不撑开表格；点击外侧、焦点移出、窗口失焦、切换设备／页签或 Esc 关闭，内部查看及滚动保持打开。关闭按钮／Esc 返回原入口，入口已移出列表时返回通信诊断页签。
 
@@ -246,7 +246,7 @@ Windows 对应 `.\.venv\Scripts\python.exe -m simulator --data-dir .data --port 
 
 删除通过专用接口 `DELETE /api/devices/{id}?version=<当前配置版本>` 执行，只允许删除已停止／故障的设备，清理其点位和历史采样配置引用，原子保存并核对版本。旧版本已保存的通配／具体监听地址重叠不会阻止删除其他设备；新建、编辑及导入仍严格拒绝引入地址冲突。
 
-以上新增颜色、汇总、批量启停、自主温控依赖、表达式变量说明、类型显示规则／浮点温控模板、操作列／hover、连接信息／持久报文详情、在线点位配置／重置、趋势自适应轴／tooltip／拖拽和删除修复包含在 `0.2.0rc8` 包中。源码更新后按上方步骤重新构建前端并重启后端。rc7 已包含原有的浮动菜单与单点位趋势气泡。
+以上新增颜色、汇总、批量启停、自主温控依赖、表达式变量说明、类型显示规则／浮点温控模板、操作列／hover、连接信息／持久报文详情、在线点位配置／重置、趋势自适应轴／tooltip／拖拽和删除修复包含在 `0.2.0rc9` 包中。源码更新后按上方步骤重新构建前端并重启后端。rc7 已包含原有的浮动菜单与单点位趋势气泡。
 
 附加参数编辑框只填写表单没有展示的参数。例如噪声的 `noise` 在上方表单填写，JSON 填写 `{"base":"fixed","value":25,"distribution":"normal"}`；删除 JSON 中的键会删除该附加参数。非法 JSON、重复的表单参数和保存失败都保留草稿，离开未保存的编辑会提示。历史采样关闭后仍可查询／导出已有数据；历史导出遵循窗口中选择的点位和时间范围。
 
@@ -292,7 +292,7 @@ PLC / SCADA ── Modbus TCP ────────┤ 单个 FastAPI / async
 
 使用同一数据目录重启后，已运行设备自动继续运行，已停止设备保持停止，策略暂停／恢复状态也保留。单台与批量控制在成功返回前通过配置库事务保存状态，正常退出释放监听不会覆盖运行意图，不依赖数值快照开关或周期。只有没有记录的新设备／旧版本设备才使用“无状态记录时自动启动”设置；更改监听 IP、端口或 Unit ID 后清除旧记录，重新启动以保存新端点状态。端口占用时显示故障，其他设备继续恢复；数据库不可用时禁止自动启动。磁盘不足或保存超时不假报持久化成功；停止仍关闭通信并报告错误，重启状态可能待核对。数值仍按最近兼容快照恢复，不能承诺断电保留最后一次赋值。
 
-此恢复功能需启动应用进程本身；宕机后自动拉起应用使用监督器及下方系统服务配置。不要删除或更换原数据目录。rc8 下载包包含恢复功能。
+此恢复功能需启动应用进程本身；宕机后自动拉起应用使用监督器及下方系统服务配置。不要删除或更换原数据目录。rc9 下载包包含恢复功能。
 
 默认预算：历史库 1024MiB、配置库 64MiB、配置备份 256MiB、临时目录 256MiB，磁盘保留 512MiB；历史保留 7 天，快照间隔 60 秒、自动恢复最大年龄 24 小时。快照单份最大 32MiB、保留两份；超限时保留最近成功版本并报告错误，不写入无法恢复的文件。在“存储与恢复”中调整预算并查看当前占用。数据目录使用本机磁盘，不放在网络共享目录上；启动运行身份须有读写权限。
 
@@ -319,13 +319,13 @@ npm --prefix frontend run build
 .venv/bin/python -m build --no-isolation
 ```
 
-Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc8-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
+Windows 使用 `scripts/build.ps1` 完成锁定依赖安装、前端构建和 Python 打包。输出为 `dist/modbus_slaver_simulator-0.2.0rc9-py3-none-any.whl`；将该文件及 `requirements.lock.txt` 复制到运行机器。运行机器仅需 Python 3.12+；安装依赖需要网络，或预先准备对应平台的离线安装包。
 
 Linux：在 wheel 与锁定文件所在目录运行：
 
 ```bash
 python3 -m venv "$HOME/modbus-simulator/venv"
-"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc8-py3-none-any.whl
+"$HOME/modbus-simulator/venv/bin/python" -m pip install --constraint requirements.lock.txt ./modbus_slaver_simulator-0.2.0rc9-py3-none-any.whl
 "$HOME/modbus-simulator/venv/bin/python" -m simulator.supervisor --data-dir "$HOME/.local/share/modbus-simulator" --port 8000
 ```
 
@@ -335,7 +335,7 @@ Windows PowerShell：在 wheel 与锁定文件所在目录运行：
 $AppDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulatorApp'
 $DataDir = Join-Path $env:LOCALAPPDATA 'ModbusSimulator'
 py -3.12 -m venv "$AppDir\venv"
-& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc8-py3-none-any.whl
+& "$AppDir\venv\Scripts\python.exe" -m pip install --constraint requirements.lock.txt .\modbus_slaver_simulator-0.2.0rc9-py3-none-any.whl
 & "$AppDir\venv\Scripts\python.exe" -m simulator.supervisor --data-dir $DataDir --port 8000
 ```
 
